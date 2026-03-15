@@ -1,0 +1,39 @@
+---
+name: Validate Action & Examples
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate action.yml against GitHub Action schema
+        run: |
+          pip install --quiet check-jsonschema
+          check-jsonschema --schemafile "https://json.schemastore.org/github-action.json" action.yml
+
+      - name: Lint example workflows
+        run: |
+          curl -sL "$(curl -sL https://api.github.com/repos/rhysd/actionlint/releases/latest \
+            | jq -r '.assets[] | select(.name | test("linux_amd64.tar.gz$")) | .browser_download_url')" \
+            | tar xz -C /usr/local/bin actionlint
+          actionlint examples/*.yml
+
+      - name: Check YAML document markers
+        run: |
+          status=0
+          for f in action.yml examples/*.yml; do
+            if ! head -1 "$f" | grep -q '^---'; then
+              echo "::error file=$f::Missing YAML document marker (---) at start of file"
+              status=1
+            fi
+          done
+          exit "$status"
