@@ -8,18 +8,27 @@ A reusable GitHub composite action that wraps [`anthropics/claude-code-action`](
 name: Claudius Review
 on:
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
-  id-token: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   review:
-    if: github.event.label.name == 'claudius-review'
+    if: >
+      github.event.pull_request.draft == false &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'claudius-review') ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'claudius-review'))
+      )
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
     steps:
       - uses: lklimek/claudius-review-action@v1
         with:
@@ -34,25 +43,35 @@ on:
   pull_request:
     types: [labeled, synchronize]
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
-  id-token: write
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   review:
-    if: |
-      github.event.action == 'labeled' && github.event.label.name == 'claudius-review' ||
-      github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'claudius-review')
+    if: >
+      github.event.pull_request.draft == false &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'ai-review') ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review'))
+      )
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
     steps:
       - uses: lklimek/claudius-review-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_model: sonnet
           max_turns: 200
-          prompt_extra: "Focus especially on security issues and SQL injection vectors."
+          trigger_label: ai-review
+          prompt_extra: |
+            Focus especially on security issues and SQL injection vectors.
+            This is a monorepo — review only files under packages/.
           plugins: |
             claudius@lklimek
             claudash@lklimek
