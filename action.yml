@@ -14,28 +14,29 @@ inputs:
     description: "Claude Code OAuth token (alternative to API key)"
     required: false
     default: ""
+  memcan_url:
+    description: "MemCan server URL (e.g., http://host:8190)"
+    required: false
+    default: ""
+  memcan_api_key:
+    description: "MemCan API key for server authentication"
+    required: false
+    default: ""
   github_token:
     description: "GitHub token for API/CLI"
     required: false
     default: ${{ github.token }}
-  claude_model:
-    description: "Claude model to use"
-    required: false
-    default: "opus"
   claude_agent:
     description: "Claude agent persona"
     required: false
     default: "claudius:claudius"
-  max_turns:
-    description: "Max conversation turns"
-    required: false
-    default: "150"
   plugins:
     description: "Newline-separated plugin list"
     required: false
     default: |
       claudius@lklimek
       claudash@lklimek
+      memcan@lklimek
   plugin_marketplaces:
     description: "Newline-separated marketplace URLs"
     required: false
@@ -64,7 +65,11 @@ inputs:
   allowed_tools:
     description: "Tool allowlist for Claude"
     required: false
-    default: "mcp__plugin_claudius_github,Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git pull *),Bash(git checkout *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(mktemp *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-post-review.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *)"
+    default: "mcp__plugin_claudius_github,Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git pull *),Bash(git checkout *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(mktemp *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-post-review.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),mcp__plugin_memcan_brain"
+  claude_extra_args:
+    description: "Additional Claude Code CLI flags (appended to built-in args)"
+    required: false
+    default: ""
   report_retention_days:
     description: "Artifact retention days"
     required: false
@@ -85,6 +90,37 @@ runs:
           echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
           exit 1
         fi
+
+    - name: Pre-flight checks
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.memcan_url }}" ] && [ -n "${{ inputs.memcan_api_key }}" ]; then
+          {
+            echo 'MEMCAN_PROMPT<<MEMCAN_EOF'
+            echo 'MemCan persistent memory is available. Use memcan:recall at session start to load project context.'
+            echo 'Use memcan:lessons-learned to save learnings after notable events.'
+            echo 'When spawning agents, pass MemCan context from recall results in their prompts.'
+            echo 'MEMCAN_EOF'
+          } >> "$GITHUB_ENV"
+        else
+          echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
+          {
+            echo 'MEMCAN_PROMPT<<MEMCAN_EOF'
+            echo 'MemCan is NOT available — skip memcan:recall, memcan:lessons-learned, and all mcp__plugin_memcan_brain__* tools.'
+            echo 'When spawning agents, instruct them to not use memcan tools.'
+            echo 'MEMCAN_EOF'
+          } >> "$GITHUB_ENV"
+        fi
+        echo "::group::Claude Code environment"
+        echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-<not set>}"
+        echo "CLAUDE_CODE_MAX_TURNS=${CLAUDE_CODE_MAX_TURNS:-<not set>}"
+        echo "CLAUDE_CODE_EFFORT_LEVEL=${CLAUDE_CODE_EFFORT_LEVEL:-<not set>}"
+        echo "CLAUDE_CODE_SUBAGENT_MODEL=${CLAUDE_CODE_SUBAGENT_MODEL:-<not set>}"
+        echo "CLAUDE_CODE_AUTO_COMPACT=${CLAUDE_CODE_AUTO_COMPACT:-<not set>}"
+        echo "CLAUDE_CODE_COMPACT_THRESHOLD=${CLAUDE_CODE_COMPACT_THRESHOLD:-<not set>}"
+        echo "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=${CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING:-<not set>}"
+        echo "CLAUDE_CODE_DISABLE_1M_CONTEXT=${CLAUDE_CODE_DISABLE_1M_CONTEXT:-<not set>}"
+        echo "::endgroup::"
 
     - name: Checkout
       if: inputs.checkout == 'true'
@@ -118,8 +154,7 @@ runs:
           Head branch: ${{ github.event.pull_request.head.ref }}
           PR title: ${{ github.event.pull_request.title }}
 
-          MemCan is NOT available in CI — skip memcan:recall, memcan:lessons-learned, and all mcp__plugin_memcan_brain__* tools.
-          When spawning agents, instruct them to not use memcan tools.
+          ${{ env.MEMCAN_PROMPT }}
 
           Use MCP tools (mcp__plugin_claudius_github__*) for GitHub operations. If an MCP call fails, fall back to gh CLI.
 
@@ -145,13 +180,15 @@ runs:
           ${{ inputs.prompt_extra }}
         claude_args: >-
           --agent ${{ inputs.claude_agent }}
-          --model ${{ inputs.claude_model }}
-          --max-turns ${{ inputs.max_turns }}
           --allowedTools "${{ inputs.allowed_tools }}"
+          ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        MEMCAN_URL: ${{ inputs.memcan_url }}
+        MEMCAN_API_KEY: ${{ inputs.memcan_api_key }}
 
     - name: Upload review report
+      id: upload-report
       if: '!cancelled()'
       uses: actions/upload-artifact@v4
       with:
@@ -161,6 +198,31 @@ runs:
           ${{ github.workspace }}/review-report/report.html
         retention-days: ${{ inputs.report_retention_days }}
         if-no-files-found: ignore
+
+    - name: Append report link to last Claude review
+      if: steps.upload-report.outputs.artifact-url != ''
+      shell: bash
+      run: |
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
+        REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
+        # Find the last review by claude[bot]
+        REVIEW_ID=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+          --jq '[.[] | select(.user.login == "claude[bot]")] | last | .id // empty')
+        if [ -n "$REVIEW_ID" ]; then
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body')
+          # Remove any previous report link to avoid duplicates
+          CLEAN_BODY=$(echo "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
+          UPDATED="${CLEAN_BODY}
+        ${REPORT_LINE}"
+          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
+            -X PUT -f body="$UPDATED"
+        else
+          # Fallback: post as a regular comment if no Claude review found
+          gh pr comment "$PR_NUMBER" --body "$REPORT_LINE"
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
 
     - name: Remove trigger label
       if: inputs.remove_label_on_success == 'true' && success()
