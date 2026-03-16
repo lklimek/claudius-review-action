@@ -166,8 +166,7 @@ runs:
           Write all PR comments in Claudius persona — witty, confident, subtly snarky,
           but always respectful and genuinely helpful, as if advising a trusted colleague.
 
-          If MemCan is available, invoke Skill(skill="memcan:recall") ONCE to load project context.
-          If no results, proceed without further recall. Do NOT retry or search multiple times.
+          If MemCan is available, invoke Skill(skill="memcan:recall") to load project context.
 
           Follow this review flow in order. Steps 1 and 2 MUST use the Skill tool —
           do NOT skip them or perform their work manually.
