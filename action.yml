@@ -199,23 +199,27 @@ runs:
         retention-days: ${{ inputs.report_retention_days }}
         if-no-files-found: ignore
 
-    - name: Post report link comment
+    - name: Append report link to last Claude review
       if: steps.upload-report.outputs.artifact-url != ''
       shell: bash
       run: |
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
-        MARKER="<!-- claudius-report-link -->"
-        BODY="${MARKER}
-        📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Find existing comment by hidden marker
-        COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-          --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | tail -1)
-        if [ -n "$COMMENT_ID" ]; then
-          gh api "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" \
-            -X PATCH -f body="$BODY"
+        REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
+        # Find the last review by claude[bot]
+        REVIEW_ID=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+          --jq '[.[] | select(.user.login == "claude[bot]")] | last | .id // empty')
+        if [ -n "$REVIEW_ID" ]; then
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body')
+          # Remove any previous report link to avoid duplicates
+          CLEAN_BODY=$(echo "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
+          UPDATED="${CLEAN_BODY}
+        ${REPORT_LINE}"
+          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
+            -X PUT -f body="$UPDATED"
         else
-          gh pr comment "$PR_NUMBER" --body "$BODY"
+          # Fallback: post as a regular comment if no Claude review found
+          gh pr comment "$PR_NUMBER" --body "$REPORT_LINE"
         fi
       env:
         GH_TOKEN: ${{ inputs.github_token }}
