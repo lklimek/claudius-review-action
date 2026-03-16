@@ -74,6 +74,10 @@ inputs:
     description: "Tool allowlist for Claude"
     required: false
     default: "mcp__plugin_claudius_github,Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git pull *),Bash(git checkout *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(mktemp *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-post-review.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),mcp__plugin_memcan_brain"
+  claude_extra_args:
+    description: "Additional Claude Code CLI flags (appended to built-in args)"
+    required: false
+    default: ""
   report_retention_days:
     description: "Artifact retention days"
     required: false
@@ -165,6 +169,7 @@ runs:
           --model ${{ inputs.claude_model }}
           --max-turns ${{ inputs.max_turns }}
           --allowedTools "${{ inputs.allowed_tools }}"
+          ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         MEMCAN_URL: ${{ inputs.memcan_url }}
