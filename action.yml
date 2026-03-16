@@ -94,8 +94,22 @@ runs:
     - name: Pre-flight checks
       shell: bash
       run: |
-        if [ -z "${{ inputs.memcan_url }}" ] || [ -z "${{ inputs.memcan_api_key }}" ]; then
+        if [ -n "${{ inputs.memcan_url }}" ] && [ -n "${{ inputs.memcan_api_key }}" ]; then
+          {
+            echo 'MEMCAN_PROMPT<<MEMCAN_EOF'
+            echo 'MemCan persistent memory is available. Use memcan:recall at session start to load project context.'
+            echo 'Use memcan:lessons-learned to save learnings after notable events.'
+            echo 'When spawning agents, pass MemCan context from recall results in their prompts.'
+            echo 'MEMCAN_EOF'
+          } >> "$GITHUB_ENV"
+        else
           echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
+          {
+            echo 'MEMCAN_PROMPT<<MEMCAN_EOF'
+            echo 'MemCan is NOT available — skip memcan:recall, memcan:lessons-learned, and all mcp__plugin_memcan_brain__* tools.'
+            echo 'When spawning agents, instruct them to not use memcan tools.'
+            echo 'MEMCAN_EOF'
+          } >> "$GITHUB_ENV"
         fi
         echo "::group::Claude Code environment"
         echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-<not set>}"
@@ -140,9 +154,7 @@ runs:
           Head branch: ${{ github.event.pull_request.head.ref }}
           PR title: ${{ github.event.pull_request.title }}
 
-          MemCan persistent memory is available. Use memcan:recall at session start to load project context.
-          Use memcan:lessons-learned to save learnings after notable events.
-          When spawning agents, pass MemCan context from recall results in their prompts.
+          ${{ env.MEMCAN_PROMPT }}
 
           Use MCP tools (mcp__plugin_claudius_github__*) for GitHub operations. If an MCP call fails, fall back to gh CLI.
 
