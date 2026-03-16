@@ -26,18 +26,10 @@ inputs:
     description: "GitHub token for API/CLI"
     required: false
     default: ${{ github.token }}
-  claude_model:
-    description: "Claude model to use"
-    required: false
-    default: "opus"
   claude_agent:
     description: "Claude agent persona"
     required: false
     default: "claudius:claudius"
-  max_turns:
-    description: "Max conversation turns"
-    required: false
-    default: "150"
   plugins:
     description: "Newline-separated plugin list"
     required: false
@@ -176,8 +168,6 @@ runs:
           ${{ inputs.prompt_extra }}
         claude_args: >-
           --agent ${{ inputs.claude_agent }}
-          --model ${{ inputs.claude_model }}
-          --max-turns ${{ inputs.max_turns }}
           --allowedTools "${{ inputs.allowed_tools }}"
           ${{ inputs.claude_extra_args }}
       env:
