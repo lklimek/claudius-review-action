@@ -160,7 +160,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
@@ -195,7 +195,7 @@ At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provide
 
 - Workflow must trigger on `pull_request: [closed]`
 - Job condition should check `github.event.pull_request.merged == true`
-- Only `contents: read` and `pull-requests: read` permissions are needed
+- `contents: read` and `pull-requests: write` permissions are needed (`write` for heart reactions)
 
 ### Cost
 

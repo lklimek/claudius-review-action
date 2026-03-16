@@ -68,7 +68,9 @@ threads_json=$(gh api graphql \
               isResolved
               comments(first: 50) {
                 nodes {
+                  databaseId
                   author { login }
+                  authorAssociation
                   body
                   path
                   createdAt
@@ -94,13 +96,17 @@ processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGT
         file: ($comments[0].path // "unknown"),
         resolved: $thread.isResolved,
         reviewer_comment: {
+          comment_id: $comments[0].databaseId,
           user: ($comments[0].author.login // "unknown"),
+          author_association: ($comments[0].authorAssociation // "NONE"),
           body: (($comments[0].body // "") | if (. | length) > $max_len then .[0:$max_len] + "..." else . end)
         },
         responses: (
           $comments[1:]
           | map({
+              comment_id: .databaseId,
               user: (.author.login // "unknown"),
+              author_association: (.authorAssociation // "NONE"),
               body: ((.body // "") | if (. | length) > $max_len then .[0:$max_len] + "..." else . end)
             })
         )

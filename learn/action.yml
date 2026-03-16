@@ -45,7 +45,7 @@ inputs:
   allowed_tools:
     description: "Tool allowlist for Claude"
     required: false
-    default: "Read,Grep,Glob,Bash(cat *),Bash(jq *),mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories"
+    default: "Read,Grep,Glob,Bash(cat *),Bash(jq *),Bash(gh api *),mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -158,6 +158,13 @@ runs:
           - memory: One specific, actionable sentence. Pattern: "In {project}, {observation} because {evidence}"
           - project: "${{ inputs.project_name }}"
           - metadata: {"type": "review-learning", "pr": ${{ github.event.pull_request.number }}, "category": "<accepted|rejected|ignored|preference>", "source": "PR#${{ github.event.pull_request.number }}"}
+
+          ## Heart Reaction
+          After successfully saving a learning via add_memory, add a heart reaction to the
+          source comment IF the comment author is a privileged user (author_association is
+          OWNER, MEMBER, or COLLABORATOR). Each thread's comments include comment_id and
+          author_association fields. Use:
+            gh api repos/${{ github.repository }}/pulls/comments/{comment_id}/reactions -f content=heart
 
           ## Rules
           - Do NOT save generic advice (e.g., "always handle errors")
