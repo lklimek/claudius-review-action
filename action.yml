@@ -106,6 +106,10 @@ runs:
           echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
         fi
 
+    - name: Debug environment
+      shell: bash
+      run: echo "CLAUDE_CODE_EFFORT_LEVEL=${CLAUDE_CODE_EFFORT_LEVEL:-<not set>}"
+
     - name: Checkout
       if: inputs.checkout == 'true'
       uses: actions/checkout@v6
