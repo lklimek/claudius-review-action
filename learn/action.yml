@@ -45,7 +45,7 @@ inputs:
   allowed_tools:
     description: "Tool allowlist for Claude"
     required: false
-    default: "Read,Grep,Glob,Bash(cat *),Bash(jq *),Bash(gh api *),mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories"
+    default: "Read,Grep,Glob,Bash(cat /tmp/claudius-learn-*),Bash(jq *),Bash(gh api repos/*/pulls/comments/*/reactions *),mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -68,6 +68,13 @@ runs:
       run: |
         REPO="${{ github.repository }}"
         PR_NUMBER="${{ github.event.pull_request.number }}"
+
+        # Validate min_review_comments is a positive integer
+        MIN_COMMENTS="${{ inputs.min_review_comments }}"
+        if ! [[ "$MIN_COMMENTS" =~ ^[0-9]+$ ]]; then
+          echo "::error::min_review_comments must be a positive integer, got: ${MIN_COMMENTS}"
+          exit 1
+        fi
 
         # Must be a merged PR
         if [ "${{ github.event.pull_request.merged }}" != "true" ]; then

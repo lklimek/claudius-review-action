@@ -4,10 +4,6 @@ on:
   pull_request:
     types: [labeled, synchronize, closed]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   review:
     if: >
@@ -17,6 +13,9 @@ jobs:
         (github.event.action == 'labeled' && github.event.label.name == 'claudius-review') ||
         (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'claudius-review'))
       )
+    concurrency:
+      group: claudius-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
