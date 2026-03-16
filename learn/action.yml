@@ -1,0 +1,173 @@
+---
+name: "Claudius Learn"
+description: "Extract learnings from Claudius code review interactions and save to MemCan"
+branding:
+  icon: book-open
+  color: purple
+
+inputs:
+  anthropic_api_key:
+    description: "Anthropic API key (alternative to OAuth)"
+    required: false
+    default: ""
+  claude_code_oauth_token:
+    description: "Claude Code OAuth token (alternative to API key)"
+    required: false
+    default: ""
+  memcan_url:
+    description: "MemCan server URL (e.g., http://host:8190)"
+    required: true
+  memcan_api_key:
+    description: "MemCan API key for server authentication"
+    required: true
+  github_token:
+    description: "GitHub token for API/CLI"
+    required: false
+    default: ${{ github.token }}
+  project_name:
+    description: "MemCan project scope (defaults to repo name)"
+    required: false
+    default: ${{ github.event.repository.name }}
+  min_review_comments:
+    description: "Minimum review comment count to trigger learning"
+    required: false
+    default: "1"
+  plugins:
+    description: "Newline-separated plugin list"
+    required: false
+    default: |
+      memcan@lklimek
+  plugin_marketplaces:
+    description: "Newline-separated marketplace URLs"
+    required: false
+    default: |
+      https://github.com/lklimek/agents.git
+  allowed_tools:
+    description: "Tool allowlist for Claude"
+    required: false
+    default: "Read,Grep,Glob,Bash(cat *),Bash(jq *),mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories"
+  claude_extra_args:
+    description: "Additional Claude Code CLI flags (appended to built-in args)"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Validate authentication
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.anthropic_api_key }}" ] && [ -z "${{ inputs.claude_code_oauth_token }}" ]; then
+          echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
+          exit 1
+        fi
+
+    - name: Check preconditions
+      id: preconditions
+      shell: bash
+      run: |
+        REPO="${{ github.repository }}"
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+
+        # Must be a merged PR
+        if [ "${{ github.event.pull_request.merged }}" != "true" ]; then
+          echo "::notice::PR was closed without merging. Skipping learn."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Must have claude[bot] reviews
+        CLAUDE_REVIEWS=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+          --jq '[.[] | select(.user.login == "claude[bot]")] | length')
+        if [ "$CLAUDE_REVIEWS" -eq 0 ]; then
+          echo "::notice::No claude[bot] reviews found on PR. Skipping learn."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Must have enough review comments
+        COMMENT_COUNT=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
+          --jq 'length')
+        if [ "$COMMENT_COUNT" -lt "${{ inputs.min_review_comments }}" ]; then
+          echo "::notice::Only ${COMMENT_COUNT} review comments (min: ${{ inputs.min_review_comments }}). Skipping learn."
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+        echo "comment_count=${COMMENT_COUNT}" >> "$GITHUB_OUTPUT"
+        echo "Found ${CLAUDE_REVIEWS} claude[bot] reviews and ${COMMENT_COUNT} review comments."
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Gather review data
+      if: steps.preconditions.outputs.skip != 'true'
+      id: gather
+      shell: bash
+      run: |
+        REPO="${{ github.repository }}"
+        PR_NUMBER="${{ github.event.pull_request.number }}"
+        TMPFILE=$(mktemp /tmp/claudius-learn-XXXXXX.json)
+
+        bash "${{ github.action_path }}/shared/gather-review-data.sh" \
+          "$REPO" "$PR_NUMBER" "$TMPFILE"
+
+        echo "data_file=${TMPFILE}" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Run Claude learning extraction
+      if: steps.preconditions.outputs.skip != 'true'
+      uses: anthropics/claude-code-action@v1
+      with:
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        use_sticky_comment: false
+        show_full_output: true
+        trigger_phrase: ""
+        plugin_marketplaces: ${{ inputs.plugin_marketplaces }}
+        plugins: ${{ inputs.plugins }}
+        prompt: |
+          You are analyzing a completed PR code review to extract reusable learnings for MemCan.
+
+          Repository: ${{ github.repository }}
+          PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+          Author: ${{ github.event.pull_request.user.login }}
+          Project (MemCan scope): ${{ inputs.project_name }}
+
+          ## Instructions
+          1. Read the review data file at: ${{ steps.gather.outputs.data_file }}
+          2. Search existing memories: search_memories(query="code review", project="${{ inputs.project_name }}")
+             Also search for topic-specific memories based on the review threads you find.
+          3. Analyze each review thread to classify as:
+             - ACCEPTED: reviewer flagged it, developer fixed it (confirms the rule)
+             - REJECTED: reviewer flagged it, developer pushed back, PR merged anyway (possible false positive or team preference)
+             - IGNORED: reviewer flagged it, no response, no fix, merged anyway (noise or low-priority)
+          4. For patterns worth remembering, check MemCan for duplicates before saving
+          5. Save NEW learnings only via add_memory
+
+          ## Quality Gate
+          Only save a learning if ALL criteria are met:
+          - It would change future review behavior (avoid a false positive, catch a real pattern)
+          - It is specific enough to be matched by semantic search
+          - It is not already captured in existing memories
+          - Confidence is medium or high (do not save low-confidence observations)
+
+          ## Memory Format
+          Use add_memory with:
+          - memory: One specific, actionable sentence. Pattern: "In {project}, {observation} because {evidence}"
+          - project: "${{ inputs.project_name }}"
+          - metadata: {"type": "review-learning", "pr": ${{ github.event.pull_request.number }}, "category": "<accepted|rejected|ignored|preference>", "source": "PR#${{ github.event.pull_request.number }}"}
+
+          ## Rules
+          - Do NOT save generic advice (e.g., "always handle errors")
+          - Do NOT save more than 5 learnings per PR — pick the most impactful ones
+          - If no threads warrant saving, that is fine — output "No new learnings" and stop
+        claude_args: >-
+          --allowedTools "${{ inputs.allowed_tools }}"
+          ${{ inputs.claude_extra_args }}
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        MEMCAN_URL: ${{ inputs.memcan_url }}
+        MEMCAN_API_KEY: ${{ inputs.memcan_api_key }}
+        CLAUDE_CODE_MAX_TURNS: "10"
