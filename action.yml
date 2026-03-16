@@ -99,16 +99,22 @@ runs:
           exit 1
         fi
 
-    - name: Check MemCan configuration
+    - name: Pre-flight checks
       shell: bash
       run: |
         if [ -z "${{ inputs.memcan_url }}" ] || [ -z "${{ inputs.memcan_api_key }}" ]; then
           echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
         fi
-
-    - name: Debug environment
-      shell: bash
-      run: echo "CLAUDE_CODE_EFFORT_LEVEL=${CLAUDE_CODE_EFFORT_LEVEL:-<not set>}"
+        echo "::group::Claude Code environment"
+        echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-<not set>}"
+        echo "CLAUDE_CODE_MAX_TURNS=${CLAUDE_CODE_MAX_TURNS:-<not set>}"
+        echo "CLAUDE_CODE_EFFORT_LEVEL=${CLAUDE_CODE_EFFORT_LEVEL:-<not set>}"
+        echo "CLAUDE_CODE_SUBAGENT_MODEL=${CLAUDE_CODE_SUBAGENT_MODEL:-<not set>}"
+        echo "CLAUDE_CODE_AUTO_COMPACT=${CLAUDE_CODE_AUTO_COMPACT:-<not set>}"
+        echo "CLAUDE_CODE_COMPACT_THRESHOLD=${CLAUDE_CODE_COMPACT_THRESHOLD:-<not set>}"
+        echo "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=${CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING:-<not set>}"
+        echo "CLAUDE_CODE_DISABLE_1M_CONTEXT=${CLAUDE_CODE_DISABLE_1M_CONTEXT:-<not set>}"
+        echo "::endgroup::"
 
     - name: Checkout
       if: inputs.checkout == 'true'
