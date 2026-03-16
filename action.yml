@@ -14,6 +14,14 @@ inputs:
     description: "Claude Code OAuth token (alternative to API key)"
     required: false
     default: ""
+  memcan_url:
+    description: "MemCan server URL (e.g., http://host:8190)"
+    required: false
+    default: ""
+  memcan_api_key:
+    description: "MemCan API key for server authentication"
+    required: false
+    default: ""
   github_token:
     description: "GitHub token for API/CLI"
     required: false
@@ -36,6 +44,7 @@ inputs:
     default: |
       claudius@lklimek
       claudash@lklimek
+      memcan@lklimek
   plugin_marketplaces:
     description: "Newline-separated marketplace URLs"
     required: false
@@ -64,7 +73,7 @@ inputs:
   allowed_tools:
     description: "Tool allowlist for Claude"
     required: false
-    default: "mcp__plugin_claudius_github,Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git pull *),Bash(git checkout *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(mktemp *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-post-review.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *)"
+    default: "mcp__plugin_claudius_github,Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git pull *),Bash(git checkout *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(mktemp *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-post-review.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),mcp__plugin_memcan_brain"
   report_retention_days:
     description: "Artifact retention days"
     required: false
@@ -84,6 +93,13 @@ runs:
         if [ -z "${{ inputs.anthropic_api_key }}" ] && [ -z "${{ inputs.claude_code_oauth_token }}" ]; then
           echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
           exit 1
+        fi
+
+    - name: Check MemCan configuration
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.memcan_url }}" ] || [ -z "${{ inputs.memcan_api_key }}" ]; then
+          echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
         fi
 
     - name: Checkout
@@ -118,8 +134,9 @@ runs:
           Head branch: ${{ github.event.pull_request.head.ref }}
           PR title: ${{ github.event.pull_request.title }}
 
-          MemCan is NOT available in CI — skip memcan:recall, memcan:lessons-learned, and all mcp__plugin_memcan_brain__* tools.
-          When spawning agents, instruct them to not use memcan tools.
+          MemCan persistent memory is available. Use memcan:recall at session start to load project context.
+          Use memcan:lessons-learned to save learnings after notable events.
+          When spawning agents, pass MemCan context from recall results in their prompts.
 
           Use MCP tools (mcp__plugin_claudius_github__*) for GitHub operations. If an MCP call fails, fall back to gh CLI.
 
@@ -150,8 +167,11 @@ runs:
           --allowedTools "${{ inputs.allowed_tools }}"
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        MEMCAN_URL: ${{ inputs.memcan_url }}
+        MEMCAN_API_KEY: ${{ inputs.memcan_api_key }}
 
     - name: Upload review report
+      id: upload-report
       if: '!cancelled()'
       uses: actions/upload-artifact@v4
       with:
@@ -161,6 +181,16 @@ runs:
           ${{ github.workspace }}/review-report/report.html
         retention-days: ${{ inputs.report_retention_days }}
         if-no-files-found: ignore
+
+    - name: Post report link comment
+      if: steps.upload-report.outputs.artifact-url != ''
+      shell: bash
+      run: |
+        ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
+        gh pr comment "${{ github.event.pull_request.number }}" \
+          --body "📊 **[View full HTML review report](${ARTIFACT_URL})**"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
 
     - name: Remove trigger label
       if: inputs.remove_label_on_success == 'true' && success()
