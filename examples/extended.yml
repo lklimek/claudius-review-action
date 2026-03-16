@@ -1,0 +1,44 @@
+---
+name: Claudius Review (Extended)
+
+"on":
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >
+      github.event.pull_request.draft == false &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'ai-review') ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: lklimek/claudius-review-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_model: sonnet
+          max_turns: 200
+          trigger_label: ai-review
+          report_retention_days: "30"
+          prompt_extra: |
+            Focus especially on security issues and SQL injection vectors.
+            This is a monorepo — review only files under packages/.
+          plugins: |
+            claudius@lklimek
+            claudash@lklimek
+            my-custom-plugin@my-org
+          plugin_marketplaces: |
+            https://github.com/lklimek/agents.git
+            https://github.com/my-org/agents.git
