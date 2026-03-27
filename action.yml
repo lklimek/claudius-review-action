@@ -138,6 +138,24 @@ runs:
         mkdir -p "${{ github.workspace }}/review-report"
         echo "REPORT_DIR=${{ github.workspace }}/review-report" >> "$GITHUB_ENV"
 
+    - name: Override MemCan MCP config
+      if: inputs.memcan_url != '' && inputs.memcan_api_key != ''
+      shell: bash
+      run: |
+        cat > "${{ github.workspace }}/.mcp.json" <<'MCPEOF'
+        {
+          "mcpServers": {
+            "brain": {
+              "type": "http",
+              "url": "${MEMCAN_URL}/mcp",
+              "headers": {
+                "Authorization": "Bearer ${MEMCAN_API_KEY}"
+              }
+            }
+          }
+        }
+        MCPEOF
+
     - name: Run Claude Code Review
       uses: anthropics/claude-code-action@v1
       with:
