@@ -142,19 +142,13 @@ runs:
       if: inputs.memcan_url != '' && inputs.memcan_api_key != ''
       shell: bash
       run: |
-        cat > "${{ github.workspace }}/.mcp.json" <<'MCPEOF'
-        {
-          "mcpServers": {
-            "brain": {
-              "type": "http",
-              "url": "${MEMCAN_URL}/mcp",
-              "headers": {
-                "Authorization": "Bearer ${MEMCAN_API_KEY}"
-              }
-            }
-          }
-        }
-        MCPEOF
+        MCP_FILE="${{ github.workspace }}/.mcp.json"
+        BRAIN_CONFIG='{"mcpServers":{"brain":{"type":"http","url":"${MEMCAN_URL}/mcp","headers":{"Authorization":"Bearer ${MEMCAN_API_KEY}"}}}}'
+        if [ -f "$MCP_FILE" ]; then
+          jq -s '.[0] * .[1]' "$MCP_FILE" <(echo "$BRAIN_CONFIG") > "${MCP_FILE}.tmp" && mv "${MCP_FILE}.tmp" "$MCP_FILE"
+        else
+          echo "$BRAIN_CONFIG" | jq . > "$MCP_FILE"
+        fi
 
     - name: Run Claude Code Review
       uses: anthropics/claude-code-action@v1
