@@ -91,6 +91,26 @@ runs:
           exit 1
         fi
 
+    - name: Verify triggering actor has write access
+      shell: bash
+      run: |
+        ACTOR="${{ github.event.sender.login }}"
+        if [ -z "$ACTOR" ]; then
+          echo "::warning::Could not determine the triggering actor (github.event.sender.login was empty) — skipping the write-access preflight. The underlying claude-code-action will still enforce this itself."
+          exit 0
+        fi
+        PERM=$(gh api "repos/${{ github.repository }}/collaborators/${ACTOR}/permission" --jq '.permission' 2>/dev/null || echo "unknown")
+        echo "Triggering actor: $ACTOR (permission: $PERM)"
+        case "$PERM" in
+          admin|write|maintain) ;;
+          *)
+            echo "::error::@${ACTOR} triggered this review but does not have write access to this repository (permission: ${PERM}). claude-code-action requires write access to run safely and will reject this with an opaque error after ~40s of setup — failing fast instead. Ask someone with write access to (re-)apply the '${{ inputs.trigger_label }}' label."
+            exit 1
+            ;;
+        esac
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
     - name: Pre-flight checks
       shell: bash
       run: |
@@ -132,6 +152,19 @@ runs:
       shell: bash
       run: git config --global url."https://github.com/".insteadOf "git@github.com:"
 
+    - name: Install report-rendering dependencies
+      shell: bash
+      run: |
+        # claudius's report scripts (consolidate_reports.py, validate_report.py,
+        # generate_review_report.py) expect these as system packages — see the
+        # claudius CLAUDE.md "Python deps come from apt" convention. Runner images
+        # don't have them; installing here avoids a mid-review crash on `import markdown`
+        # (or jsonschema/jinja2/etc.) inside the sandboxed Claude session.
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
+          python3-markdown python3-jsonschema python3-yaml python3-jinja2 \
+          python3-bs4 python3-nh3 python3-markupsafe python3-reportlab python3-matplotlib
+
     - name: Create report directory
       shell: bash
       run: |
@@ -171,6 +204,15 @@ runs:
           permanently, and any step that depended on it (consolidation, report writing, posting
           comments) will silently never happen. Do not end your turn until report.json has
           actually been written and findings have been posted.
+
+          TaskOutput can time out and return before an agent is actually done (you'll see
+          something like status:running in its result instead of a final answer) — that is NOT
+          completion. On a timeout, call TaskOutput again for the same task_id and keep re-blocking
+          until you get the agent's real result. Never treat a timed-out TaskOutput call as
+          "collected" and move on. This rule applies transitively: any specialist agent you spawn
+          (e.g. via claudius:grumpy-review) that itself spawns further sub-agents is bound by the
+          same rule — tell it so explicitly in its own spawn prompt, since it has no way to know
+          it's running headless otherwise.
 
           Do NOT create temporary directories (mktemp). Use REPORT_DIR env var for report output.
 
@@ -258,6 +300,7 @@ runs:
       shell: bash
       run: |
         gh pr edit "${{ github.event.pull_request.number }}" \
-          --remove-label "${{ inputs.trigger_label }}" 2>/dev/null || true
+          --remove-label "${{ inputs.trigger_label }}" \
+          || echo "::warning::Failed to remove the '${{ inputs.trigger_label }}' label. It will stay on the PR, which will re-trigger a full review on the next push — check that the token has label-write access."
       env:
         GH_TOKEN: ${{ inputs.github_token }}
