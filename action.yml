@@ -161,6 +161,17 @@ runs:
           Sub-agents have no conversation history —
           pass all relevant PR context explicitly when spawning them.
 
+          This is a single-shot headless run: once your turn ends this process exits and nothing
+          resumes you later — there is no later turn for a completion notification to reach you.
+          You may still spawn agents in the background for concurrency, but you are the foreground
+          monitor for them: after dispatching, call TaskOutput(task_id=..., block=true) for every
+          agent you spawned and wait for its actual result before proceeding. Never end your turn
+          (e.g. with a "sit tight, I'll report back once the crew returns" message) while any
+          dispatched agent has not yet been collected — an uncollected agent is abandoned
+          permanently, and any step that depended on it (consolidation, report writing, posting
+          comments) will silently never happen. Do not end your turn until report.json has
+          actually been written and findings have been posted.
+
           Do NOT create temporary directories (mktemp). Use REPORT_DIR env var for report output.
 
           Write all PR comments in Claudius persona — witty, confident, subtly snarky,
@@ -203,6 +214,19 @@ runs:
           ${{ github.workspace }}/review-report/report.html
         retention-days: ${{ inputs.report_retention_days }}
         if-no-files-found: ignore
+
+    - name: Verify review report was produced
+      if: '!cancelled()'
+      shell: bash
+      run: |
+        if [ ! -f "${{ github.workspace }}/review-report/report.json" ]; then
+          echo "::error::review-report/report.json is missing. The review agent ended its turn" \
+            "without producing a report — most likely it spawned specialist agents in the" \
+            "background and abandoned them (this run is single-shot; nothing resumes it). No" \
+            "findings were posted. Failing the job instead of silently succeeding; the" \
+            "'${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
+          exit 1
+        fi
 
     - name: Append report link to last Claude review
       if: steps.upload-report.outputs.artifact-url != ''
