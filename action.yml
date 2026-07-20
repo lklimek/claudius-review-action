@@ -162,13 +162,15 @@ runs:
           pass all relevant PR context explicitly when spawning them.
 
           This is a single-shot headless run: once your turn ends this process exits and nothing
-          resumes you later. NEVER spawn agents with run_in_background:true (or any equivalent
-          async/detached mode) — an agent still running when your turn ends is abandoned
-          permanently, and any step that depends on its result (consolidation, report writing,
-          posting comments) will silently never happen. Spawn agents synchronously instead:
-          multiple Agent calls issued together in one message already run concurrently, and your
-          turn blocks until all of them return — same parallelism, nothing abandoned. Do not end
-          your turn until report.json has actually been written and findings have been posted.
+          resumes you later — there is no later turn for a completion notification to reach you.
+          You may still spawn agents in the background for concurrency, but you are the foreground
+          monitor for them: after dispatching, call TaskOutput(task_id=..., block=true) for every
+          agent you spawned and wait for its actual result before proceeding. Never end your turn
+          (e.g. with a "sit tight, I'll report back once the crew returns" message) while any
+          dispatched agent has not yet been collected — an uncollected agent is abandoned
+          permanently, and any step that depended on it (consolidation, report writing, posting
+          comments) will silently never happen. Do not end your turn until report.json has
+          actually been written and findings have been posted.
 
           Do NOT create temporary directories (mktemp). Use REPORT_DIR env var for report output.
 
