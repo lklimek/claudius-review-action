@@ -163,7 +163,17 @@ runs:
         sudo apt-get update -qq
         sudo apt-get install -y -qq \
           python3-markdown python3-jsonschema python3-yaml python3-jinja2 \
-          python3-bs4 python3-nh3 python3-markupsafe python3-reportlab python3-matplotlib
+          python3-bs4 python3-markupsafe python3-reportlab python3-matplotlib
+        # python3-nh3 isn't resolvable via apt on every runner image (it entered
+        # Ubuntu's archives later than some LTS releases still in use), and an
+        # `apt-get install` failure on just this package would abort the whole
+        # step — taking the review down with it. Try apt first to keep the
+        # system-package convention where it's available; fall back to pip only
+        # for this one package when apt can't provide it.
+        if ! sudo apt-get install -y -qq python3-nh3; then
+          echo "python3-nh3 not available via apt on this runner; falling back to pip"
+          pip3 install --break-system-packages --quiet nh3
+        fi
 
     - name: Create report directory
       shell: bash
