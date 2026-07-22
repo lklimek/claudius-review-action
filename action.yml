@@ -260,6 +260,16 @@ runs:
              Do NOT review the code yourself — the skill handles the full pipeline.
              Generate HTML format instead of markdown (use --format html in the render step).
              REPORT_DIR is pre-set to ${{ github.workspace }}/review-report — write report.json and report.html there. Do NOT create temp directories for reports.
+
+             This job runs in an ephemeral sandbox with no warm Rust build cache, so any
+             `cargo test`/`cargo build` here always pays a full cold compile — unlike a
+             persistent dev machine. Tell claudius:grumpy-review explicitly (and it must relay
+             this to qa-engineer-marvin) to skip full `cargo test`/`cargo build` execution as
+             verification in this environment: this repository's own CI pipeline already runs
+             the full test suite on this PR as the verification backstop. Prefer static
+             verification instead — reading code, `cargo check`/`clippy` only if fast, git
+             history, grep. An agent that can't verify a claim without compiling should report
+             it as unverified rather than paying the cold-compile cost.
           3. Post only MEDIUM severity and higher findings as new inline PR comments.
           4. If no unresolved comments remain after the full flow, approve the PR.
 
