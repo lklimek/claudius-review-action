@@ -54,6 +54,10 @@ inputs:
     description: "Whether to remove trigger label"
     required: false
     default: "true"
+  debug_output:
+    description: "Show full raw Claude Code JSON output (tool calls/results) in the job log. WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting. Independent of GitHub's own 'Enable debug logging' re-run checkbox, which has no effect on this action's verbosity."
+    required: false
+    default: "false"
   checkout:
     description: "Whether action handles git checkout"
     required: false
@@ -155,22 +159,36 @@ runs:
     - name: Install report-rendering dependencies
       shell: bash
       run: |
+        # GH-hosted runners can still be running apt-daily/apt-daily-upgrade in
+        # the background right after boot, holding the dpkg lock; apt then
+        # blocks with zero output (not even under -qq) until the lock frees,
+        # which has been observed to add 20-30+ minutes of silent stall to this
+        # step. Stop those timers/services first so our apt-get calls run
+        # immediately instead of queuing behind them.
+        sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+        sudo systemctl kill --kill-who=all apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+
         # claudius's report scripts (consolidate_reports.py, validate_report.py,
         # generate_review_report.py) expect these as system packages — see the
         # claudius CLAUDE.md "Python deps come from apt" convention. Runner images
         # don't have them; installing here avoids a mid-review crash on `import markdown`
         # (or jsonschema/jinja2/etc.) inside the sandboxed Claude session.
+        # matplotlib/reportlab are deliberately excluded: they're only imported
+        # by generate_review_report.py's `--format pdf` path, and this action's
+        # prompt always renders `--format html`. Restore them here if that ever
+        # changes. --no-install-recommends skips their would-be Tk/X11/font
+        # transitive closure that html/md/triage rendering never touches.
         sudo apt-get update -qq
-        sudo apt-get install -y -qq \
+        sudo apt-get install -y -qq --no-install-recommends \
           python3-markdown python3-jsonschema python3-yaml python3-jinja2 \
-          python3-bs4 python3-markupsafe python3-reportlab python3-matplotlib
+          python3-bs4 python3-markupsafe
         # python3-nh3 isn't resolvable via apt on every runner image (it entered
         # Ubuntu's archives later than some LTS releases still in use), and an
         # `apt-get install` failure on just this package would abort the whole
         # step — taking the review down with it. Try apt first to keep the
         # system-package convention where it's available; fall back to pip only
         # for this one package when apt can't provide it.
-        if ! sudo apt-get install -y -qq python3-nh3; then
+        if ! sudo apt-get install -y -qq --no-install-recommends python3-nh3; then
           echo "python3-nh3 not available via apt on this runner; falling back to pip"
           pip3 install --break-system-packages --quiet nh3
         fi
@@ -187,7 +205,7 @@ runs:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         use_sticky_comment: true
-        show_full_output: true
+        show_full_output: ${{ inputs.debug_output }}
         trigger_phrase: ""
         plugin_marketplaces: ${{ inputs.plugin_marketplaces }}
         plugins: ${{ inputs.plugins }}
@@ -242,6 +260,16 @@ runs:
              Do NOT review the code yourself — the skill handles the full pipeline.
              Generate HTML format instead of markdown (use --format html in the render step).
              REPORT_DIR is pre-set to ${{ github.workspace }}/review-report — write report.json and report.html there. Do NOT create temp directories for reports.
+
+             This job runs in an ephemeral sandbox with no warm Rust build cache, so any
+             `cargo test`/`cargo build` here always pays a full cold compile — unlike a
+             persistent dev machine. Tell claudius:grumpy-review explicitly (and it must relay
+             this to qa-engineer-marvin) to skip full `cargo test`/`cargo build` execution as
+             verification in this environment: this repository's own CI pipeline already runs
+             the full test suite on this PR as the verification backstop. Prefer static
+             verification instead — reading code, `cargo check`/`clippy` only if fast, git
+             history, grep. An agent that can't verify a claim without compiling should report
+             it as unverified rather than paying the cold-compile cost.
           3. Post only MEDIUM severity and higher findings as new inline PR comments.
           4. If no unresolved comments remain after the full flow, approve the PR.
 
