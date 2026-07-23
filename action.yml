@@ -112,20 +112,28 @@ runs:
         # fast preflight agrees with what the underlying action will actually do
         # (it's passed through to that action below too). Without this, a
         # triage-permission bot allow-listed there would still get rejected here.
-        # GitHub usernames are case-insensitive, so compare lowercased; trim
-        # whitespace on both the wildcard and each list entry so a stray space
-        # (e.g. "* " or " some-bot") doesn't silently break the intended match.
+        #
+        # Normalize (trim) once and export it via GITHUB_ENV so the exact same
+        # string is what claude-code-action itself receives below — otherwise
+        # the two steps could independently disagree on edge cases like a
+        # trailing space in "* " and reintroduce the opaque ~40s failure this
+        # preflight exists to avoid. Match is exact-case, not case-folded:
+        # claude-code-action compares the raw actor string exactly (GitHub
+        # logins are case-insensitive for lookup, but that's not what it does
+        # here), so case-folding here would let this preflight pass while
+        # upstream still rejects a differently-cased entry — worse than today,
+        # since it would fail slow and opaque instead of fast and clear.
         ALLOWED_NON_WRITE="$(echo "${{ inputs.allowed_non_write_users }}" | xargs)"
+        echo "ALLOWED_NON_WRITE_USERS=${ALLOWED_NON_WRITE}" >> "$GITHUB_ENV"
+
         if [ "$ALLOWED_NON_WRITE" = "*" ]; then
           echo "allowed_non_write_users='*' — skipping the write-access preflight for @${ACTOR}."
           exit 0
         fi
-        ACTOR_LOWER="$(echo "$ACTOR" | tr '[:upper:]' '[:lower:]')"
         IFS=',' read -ra ALLOWED_LIST <<< "$ALLOWED_NON_WRITE"
         for u in "${ALLOWED_LIST[@]}"; do
           u="$(echo "$u" | xargs)"
-          u_lower="$(echo "$u" | tr '[:upper:]' '[:lower:]')"
-          if [ -n "$u_lower" ] && [ "$u_lower" = "$ACTOR_LOWER" ]; then
+          if [ -n "$u" ] && [ "$u" = "$ACTOR" ]; then
             echo "Triggering actor @${ACTOR} is in allowed_non_write_users — skipping the write-access preflight."
             exit 0
           fi
@@ -136,7 +144,7 @@ runs:
         case "$PERM" in
           admin|write) ;;
           *)
-            echo "::error::@${ACTOR} triggered this review but does not have write access to this repository (permission: ${PERM}). claude-code-action requires admin or write access to run safely and rejects anything less — including 'maintain' or 'triage' — with an opaque error after ~40s of setup; failing fast instead. Ask someone with write access to (re-)apply the '${{ inputs.trigger_label }}' label, or add '${ACTOR}' to this action's allowed_non_write_users input if it's a trusted bot/service account."
+            echo "::error::@${ACTOR} triggered this review but does not have write access to this repository (permission: ${PERM}). claude-code-action requires admin or write access to run safely and rejects anything less — including 'maintain' or 'triage' — with an opaque error after ~40s of setup; failing fast instead. Ask someone with write access to (re-)apply the '${{ inputs.trigger_label }}' label, or add '${ACTOR}' to this action's allowed_non_write_users input if it's a trusted bot/service account (matching is exact-case, same as claude-code-action itself)."
             exit 1
             ;;
         esac
@@ -236,7 +244,10 @@ runs:
         show_full_output: ${{ inputs.debug_output }}
         trigger_phrase: ""
         github_token: ${{ inputs.github_token }}
-        allowed_non_write_users: ${{ inputs.allowed_non_write_users }}
+        # Use the value normalized (trimmed) by the preflight step above, not
+        # the raw input — guarantees this step and the preflight always agree
+        # on the exact same string. See that step's comments for why.
+        allowed_non_write_users: ${{ env.ALLOWED_NON_WRITE_USERS }}
         plugin_marketplaces: ${{ inputs.plugin_marketplaces }}
         plugins: ${{ inputs.plugins }}
         prompt: |
