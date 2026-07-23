@@ -95,6 +95,7 @@ jobs:
 | `memcan_url` | No | `""` | MemCan server URL (e.g., `http://host:8190`) |
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
 | `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
+| `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |
 | `claude_agent` | No | `claudius:claudius` | Claude agent persona |
 | `plugins` | No | `claudius@lklimek`, `claudash@lklimek`, `memcan@lklimek` | Newline-separated plugin list |
 | `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
@@ -108,6 +109,27 @@ jobs:
 | `report_retention_days` | No | `14` | Artifact retention days |
 
 At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
+
+### Triggering by non-write actors
+
+By default, only actors with `admin` or `write` repo access can trigger a
+review (add/re-add the trigger label, or push to an already-labeled PR). This
+is enforced twice: a fast preflight in this action, and again inside
+`claude-code-action` itself — both exist because the underlying action's own
+rejection is an opaque error surfacing ~40s into setup.
+
+If a bot or service account with only `triage` permission (e.g. one that
+applies the trigger label on your behalf) needs to trigger reviews, add it to
+`allowed_non_write_users`:
+
+```yaml
+with:
+  allowed_non_write_users: my-triage-bot
+```
+
+Use a comma-separated list for multiple accounts, or `*` to allow any actor
+(not recommended on public repos — see the input's description in
+[`action.yml`](action.yml) for the security caveat).
 
 ## Claude Code Environment Variables
 
