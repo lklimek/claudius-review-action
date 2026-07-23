@@ -112,15 +112,20 @@ runs:
         # fast preflight agrees with what the underlying action will actually do
         # (it's passed through to that action below too). Without this, a
         # triage-permission bot allow-listed there would still get rejected here.
-        ALLOWED_NON_WRITE="${{ inputs.allowed_non_write_users }}"
+        # GitHub usernames are case-insensitive, so compare lowercased; trim
+        # whitespace on both the wildcard and each list entry so a stray space
+        # (e.g. "* " or " some-bot") doesn't silently break the intended match.
+        ALLOWED_NON_WRITE="$(echo "${{ inputs.allowed_non_write_users }}" | xargs)"
         if [ "$ALLOWED_NON_WRITE" = "*" ]; then
           echo "allowed_non_write_users='*' — skipping the write-access preflight for @${ACTOR}."
           exit 0
         fi
+        ACTOR_LOWER="$(echo "$ACTOR" | tr '[:upper:]' '[:lower:]')"
         IFS=',' read -ra ALLOWED_LIST <<< "$ALLOWED_NON_WRITE"
         for u in "${ALLOWED_LIST[@]}"; do
           u="$(echo "$u" | xargs)"
-          if [ -n "$u" ] && [ "$u" = "$ACTOR" ]; then
+          u_lower="$(echo "$u" | tr '[:upper:]' '[:lower:]')"
+          if [ -n "$u_lower" ] && [ "$u_lower" = "$ACTOR_LOWER" ]; then
             echo "Triggering actor @${ACTOR} is in allowed_non_write_users — skipping the write-access preflight."
             exit 0
           fi
