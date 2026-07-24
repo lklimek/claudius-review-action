@@ -312,7 +312,15 @@ runs:
              history, grep. An agent that can't verify a claim without compiling should report
              it as unverified rather than paying the cold-compile cost.
           3. Post only MEDIUM severity and higher findings as new inline PR comments.
-          4. If no unresolved comments remain after the full flow, approve the PR.
+             When submitting the review (via `pull_request_review_write` or `gh-post-review.sh`),
+             ALWAYS set a non-empty summary `body` — e.g. a one-line overall assessment plus
+             finding count, even when every finding is carried as an inline comment. NEVER submit
+             a review with inline comments but a blank/omitted body: GitHub's review-update API
+             permanently refuses to add a body later to a review that was created with none
+             (422 "Could not edit a review with a missing body"), which breaks the report-link
+             step below.
+          4. If no unresolved comments remain after the full flow, approve the PR — again with a
+             non-empty summary body (e.g. "No unresolved findings — approved.").
 
           ${{ inputs.prompt_extra }}
         claude_args: >-
@@ -359,16 +367,22 @@ runs:
         # Find the last review by claude[bot]
         REVIEW_ID=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
           --jq '[.[] | select(.user.login == "claude[bot]")] | last | .id // empty')
+        BODY=""
         if [ -n "$REVIEW_ID" ]; then
-          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body')
-          # Remove any previous report link to avoid duplicates
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
+        fi
+        if [ -n "$REVIEW_ID" ] && [ -n "$BODY" ]; then
           CLEAN_BODY=$(echo "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
           UPDATED="${CLEAN_BODY}
         ${REPORT_LINE}"
           gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
             -X PUT -f body="$UPDATED"
         else
-          # Fallback: post as a regular comment if no Claude review found
+          # Fallback: post as a regular comment if no Claude review found, or if the
+          # found review has an empty body — GitHub's review-update API rejects PUTs
+          # against a review whose original body is empty/missing (422 "Could not
+          # edit a review with a missing body"), which happens whenever a review was
+          # submitted with only inline comments and no summary text.
           gh pr comment "$PR_NUMBER" --body "$REPORT_LINE"
         fi
       env:
