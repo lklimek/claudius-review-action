@@ -369,10 +369,9 @@ runs:
           --jq '[.[] | select(.user.login == "claude[bot]")] | last | .id // empty')
         BODY=""
         if [ -n "$REVIEW_ID" ]; then
-          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body')
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
         fi
         if [ -n "$REVIEW_ID" ] && [ -n "$BODY" ]; then
-          # Remove any previous report link to avoid duplicates
           CLEAN_BODY=$(echo "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
           UPDATED="${CLEAN_BODY}
         ${REPORT_LINE}"
