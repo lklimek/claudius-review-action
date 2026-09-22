@@ -129,17 +129,24 @@ the `synchronize` branch re-triggers on new pushes as long as that request is
 still pending. Set `remove_label_on_success: false` since there's no trigger
 label in this mode — but set `reviewer_login` to the same account named in
 the `if:` condition above, or the pending request never clears: the review
-itself is posted under whichever identity `claude_code_oauth_token` /
-`github_token` authenticates as, not under `reviewer_login`, so GitHub does
-**not** auto-clear that account's own pending review request the way it
-would if it had reviewed itself. Without `reviewer_login` set, the request
-stays forever and every subsequent push re-triggers a full review. To get a
-fresh review later, just re-request the review; that fires a new
-`review_requested` event instead of re-applying a label.
+itself is posted under whichever GitHub identity `github_token` authenticates
+as, not under `reviewer_login`, so GitHub does **not** auto-clear that
+account's own pending review request the way it would if it had reviewed
+itself. Without `reviewer_login` set, the request stays forever and every
+subsequent push re-triggers a full review. To get a fresh review later, just
+re-request the review; that fires a new `review_requested` event instead of
+re-applying a label.
 
 Requires the reviewer account to be an actual collaborator (not just
 implicit public-repo read access) with at least `read`/`triage` permission —
 otherwise it won't show up in GitHub's reviewer picker at all.
+
+This mode is still gated by the same write-access preflight described in
+["Triggering by non-write actors"](#triggering-by-non-write-actors) above —
+it checks `github.event.sender.login` (whoever requested the review, or
+pushed on `synchronize`), not the reviewer being requested. If that person
+or bot doesn't have `write`/`admin` access, add them to
+`allowed_non_write_users` the same way you would for the label trigger.
 
 ## Inputs
 

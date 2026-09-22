@@ -59,7 +59,7 @@ inputs:
     required: false
     default: "true"
   reviewer_login:
-    description: "GitHub login requested as reviewer to clear from pending review requests on success — set this when triggering via review_requested (see README's 'Triggering by Review Request'). The review itself is posted under a different identity (the token behind claude_code_oauth_token/github_token), so GitHub never auto-clears this account's own pending request; leave empty (default) to skip this step, e.g. when only using the label trigger."
+    description: "GitHub login requested as reviewer to clear from pending review requests on success — set this when triggering via review_requested (see README's 'Triggering by Review Request'). The review itself is posted under whichever GitHub identity github_token authenticates as, not this account, so GitHub never auto-clears this account's own pending request; leave empty (default) to skip this step, e.g. when only using the label trigger."
     required: false
     default: ""
   remove_review_request_on_success:
@@ -410,10 +410,10 @@ runs:
       if: inputs.remove_review_request_on_success == 'true' && inputs.reviewer_login != '' && success()
       shell: bash
       run: |
-        # The review itself was just posted under a different identity than
-        # inputs.reviewer_login (whichever account claude_code_oauth_token /
-        # github_token authenticates as), so GitHub never auto-clears
-        # reviewer_login's own pending review request when that review lands.
+        # The review itself was just posted under whichever GitHub identity
+        # github_token authenticates as, not inputs.reviewer_login, so
+        # GitHub never auto-clears reviewer_login's own pending review
+        # request when that review lands.
         # Left alone, requested_reviewers keeps containing reviewer_login
         # forever, and a 'synchronize'-gated if-condition checking for it
         # would re-trigger a full review on every subsequent push.
