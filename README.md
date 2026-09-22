@@ -171,6 +171,7 @@ or bot doesn't have `write`/`admin` access, add them to
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
+| `debug_output` | No | `false` | Show full raw Claude Code JSON output in the job log. Also turns on automatically when GitHub's "Enable debug logging" re-run checkbox is checked. **WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting**, and be aware that checkbox trips the same warning |
 
 At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
 
