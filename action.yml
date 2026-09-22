@@ -67,7 +67,7 @@ inputs:
     required: false
     default: "true"
   debug_output:
-    description: "Show full raw Claude Code JSON output (tool calls/results) in the job log. WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting. Independent of GitHub's own 'Enable debug logging' re-run checkbox, which has no effect on this action's verbosity."
+    description: "Show full raw Claude Code JSON output (tool calls/results) in the job log. WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting. Also turned on automatically when GitHub's own 'Enable debug logging' re-run checkbox is checked (RUNNER_DEBUG=1) — that checkbox alone otherwise triggers extra runner-level tracing but leaves this action just as quiet, and a re-run replays the original workflow snapshot so editing this input wouldn't reach an already-triggered re-run anyway."
     required: false
     default: "false"
   checkout:
@@ -243,13 +243,29 @@ runs:
         mkdir -p "${{ github.workspace }}/review-report"
         echo "REPORT_DIR=${{ github.workspace }}/review-report" >> "$GITHUB_ENV"
 
+    - name: Compute effective debug output
+      shell: bash
+      run: |
+        # RUNNER_DEBUG=1 is set by the runner for the whole job when someone
+        # checks GitHub's own "Enable debug logging" box on a re-run — fold
+        # it into debug_output so that checkbox actually gets you the full
+        # Claude turn-by-turn output, without needing to edit this workflow.
+        # Re-running an existing run replays its original workflow snapshot,
+        # so editing debug_output afterwards wouldn't apply to a re-run
+        # anyway — this is the only way that checkbox can reach it.
+        if [ "${RUNNER_DEBUG:-}" = "1" ] || [ "${{ inputs.debug_output }}" = "true" ]; then
+          echo "EFFECTIVE_DEBUG_OUTPUT=true" >> "$GITHUB_ENV"
+        else
+          echo "EFFECTIVE_DEBUG_OUTPUT=false" >> "$GITHUB_ENV"
+        fi
+
     - name: Run Claude Code Review
       uses: anthropics/claude-code-action@v1
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         use_sticky_comment: true
-        show_full_output: ${{ inputs.debug_output }}
+        show_full_output: ${{ env.EFFECTIVE_DEBUG_OUTPUT }}
         trigger_phrase: ""
         github_token: ${{ inputs.github_token }}
         # Use the value normalized (trimmed) by the preflight step above, not
