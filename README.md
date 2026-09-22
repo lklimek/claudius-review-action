@@ -86,6 +86,68 @@ jobs:
             https://github.com/my-org/agents.git
 ```
 
+## Triggering by Review Request
+
+Instead of a label, you can trigger a review by requesting the bot account
+as a PR reviewer:
+
+```yaml
+name: Claudius Review
+on:
+  pull_request:
+    types: [review_requested, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >
+      github.event.pull_request.draft == false &&
+      (
+        (github.event.action == 'review_requested' && github.event.requested_reviewer.login == 'Claudius-Maginificent') ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.requested_reviewers.*.login, 'Claudius-Maginificent'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: lklimek/claudius-review-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          remove_label_on_success: false
+          reviewer_login: Claudius-Maginificent
+```
+
+`review_requested` fires the moment the account is requested as a reviewer;
+the `synchronize` branch re-triggers on new pushes as long as that request is
+still pending. Set `remove_label_on_success: false` since there's no trigger
+label in this mode — but set `reviewer_login` to the same account named in
+the `if:` condition above, or the pending request never clears: the review
+itself is posted under whichever GitHub identity `github_token` authenticates
+as, not under `reviewer_login`, so GitHub does **not** auto-clear that
+account's own pending review request the way it would if it had reviewed
+itself. Without `reviewer_login` set, the request stays forever and every
+subsequent push re-triggers a full review. To get a fresh review later, just
+re-request the review; that fires a new `review_requested` event instead of
+re-applying a label.
+
+Requires the reviewer account to be an actual collaborator (not just
+implicit public-repo read access) with at least `read`/`triage` permission —
+otherwise it won't show up in GitHub's reviewer picker at all.
+
+This mode is still gated by the same write-access preflight described in
+["Triggering by non-write actors"](#triggering-by-non-write-actors) above —
+it checks `github.event.sender.login` (whoever requested the review, or
+pushed on `synchronize`), not the reviewer being requested. If that person
+or bot doesn't have `write`/`admin` access, add them to
+`allowed_non_write_users` the same way you would for the label trigger.
+
 ## Inputs
 
 | Input | Required | Default | Description |
@@ -102,6 +164,8 @@ jobs:
 | `prompt_extra` | No | `""` | Additional instructions appended to core prompt |
 | `trigger_label` | No | `claudius-review` | Label to remove on success |
 | `remove_label_on_success` | No | `true` | Whether to remove trigger label |
+| `reviewer_login` | No | `""` | GitHub login to clear from pending review requests on success (review-request trigger mode only). No-op when empty |
+| `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
 | `checkout` | No | `true` | Whether action handles git checkout |
 | `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true) |
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |

@@ -58,6 +58,14 @@ inputs:
     description: "Whether to remove trigger label"
     required: false
     default: "true"
+  reviewer_login:
+    description: "GitHub login requested as reviewer to clear from pending review requests on success — set this when triggering via review_requested (see README's 'Triggering by Review Request'). The review itself is posted under whichever GitHub identity github_token authenticates as, not this account, so GitHub never auto-clears this account's own pending request; leave empty (default) to skip this step, e.g. when only using the label trigger."
+    required: false
+    default: ""
+  remove_review_request_on_success:
+    description: "Whether to clear reviewer_login's pending review request on success. No-op when reviewer_login is empty."
+    required: false
+    default: "true"
   debug_output:
     description: "Show full raw Claude Code JSON output (tool calls/results) in the job log. WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting. Independent of GitHub's own 'Enable debug logging' re-run checkbox, which has no effect on this action's verbosity."
     required: false
@@ -395,5 +403,23 @@ runs:
         gh pr edit "${{ github.event.pull_request.number }}" \
           --remove-label "${{ inputs.trigger_label }}" \
           || echo "::warning::Failed to remove the '${{ inputs.trigger_label }}' label. It will stay on the PR, which will re-trigger a full review on the next push — check that the token has label-write access."
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Remove pending review request
+      if: inputs.remove_review_request_on_success == 'true' && inputs.reviewer_login != '' && success()
+      shell: bash
+      run: |
+        # The review itself was just posted under whichever GitHub identity
+        # github_token authenticates as, not inputs.reviewer_login, so
+        # GitHub never auto-clears reviewer_login's own pending review
+        # request when that review lands.
+        # Left alone, requested_reviewers keeps containing reviewer_login
+        # forever, and a 'synchronize'-gated if-condition checking for it
+        # would re-trigger a full review on every subsequent push.
+        gh api --method DELETE \
+          "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/requested_reviewers" \
+          -f "reviewers[]=${{ inputs.reviewer_login }}" \
+          || echo "::warning::Failed to remove the pending review request for '${{ inputs.reviewer_login }}'. It will stay on the PR, which will re-trigger a full review on the next push — check that the token has pull-requests write access."
       env:
         GH_TOKEN: ${{ inputs.github_token }}
