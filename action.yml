@@ -67,7 +67,19 @@ inputs:
     required: false
     default: "true"
   debug_output:
-    description: "Show full raw Claude Code JSON output (tool calls/results) in the job log. WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting. Also turned on automatically when GitHub's own 'Enable debug logging' re-run checkbox is checked (the runner.debug context is '1') — that checkbox alone otherwise triggers extra runner-level tracing but leaves this action just as quiet, and a re-run replays the original workflow snapshot so editing this input wouldn't reach an already-triggered re-run anyway."
+    description: >-
+      Show full raw Claude Code JSON output (tool calls/results) in the job
+      log.
+
+      WARNING: may leak secrets/tokens into publicly-visible Actions logs —
+      enable only for troubleshooting.
+
+      Also turned on automatically when GitHub's own 'Enable debug logging'
+      re-run checkbox is checked (the runner.debug context is '1') — that
+      checkbox alone otherwise triggers extra runner-level tracing but
+      leaves this action just as quiet, and a re-run replays the original
+      workflow snapshot so editing this input wouldn't reach an
+      already-triggered re-run anyway.
     required: false
     default: "false"
   checkout:
