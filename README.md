@@ -86,6 +86,54 @@ jobs:
             https://github.com/my-org/agents.git
 ```
 
+## Triggering by Review Request
+
+Instead of a label, you can trigger a review by requesting the bot account
+as a PR reviewer:
+
+```yaml
+name: Claudius Review
+on:
+  pull_request:
+    types: [review_requested, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >
+      github.event.pull_request.draft == false &&
+      (
+        (github.event.action == 'review_requested' && github.event.requested_reviewer.login == 'Claudius-Maginificent') ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.requested_reviewers.*.login, 'Claudius-Maginificent'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: lklimek/claudius-review-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          remove_label_on_success: false
+```
+
+`review_requested` fires the moment the account is requested as a reviewer;
+the `synchronize` branch re-triggers on new pushes as long as that request is
+still pending. GitHub clears the pending request itself once the action
+submits its PR review, so there's no label cleanup to do — set
+`remove_label_on_success: false` since there's no trigger label in this mode.
+To get a fresh review later, just re-request the review; that fires a new
+`review_requested` event instead of re-applying a label.
+
+Requires the reviewer account to be a collaborator with at least `read`
+access to the repo — `triage` is enough.
+
 ## Inputs
 
 | Input | Required | Default | Description |

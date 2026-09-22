@@ -19,6 +19,7 @@ learn/
 examples/
   minimal.yml           # Minimal workflow
   extended.yml          # Extended workflow with all options
+  review-request.yml    # Trigger via review request instead of a label
   combined.yml          # Review + learn in one file
   learn.yml             # Standalone learn workflow
 README.md
