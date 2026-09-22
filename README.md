@@ -121,18 +121,25 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           remove_label_on_success: false
+          reviewer_login: Claudius-Maginificent
 ```
 
 `review_requested` fires the moment the account is requested as a reviewer;
 the `synchronize` branch re-triggers on new pushes as long as that request is
-still pending. GitHub clears the pending request itself once the action
-submits its PR review, so there's no label cleanup to do — set
-`remove_label_on_success: false` since there's no trigger label in this mode.
-To get a fresh review later, just re-request the review; that fires a new
+still pending. Set `remove_label_on_success: false` since there's no trigger
+label in this mode — but set `reviewer_login` to the same account named in
+the `if:` condition above, or the pending request never clears: the review
+itself is posted under whichever identity `claude_code_oauth_token` /
+`github_token` authenticates as, not under `reviewer_login`, so GitHub does
+**not** auto-clear that account's own pending review request the way it
+would if it had reviewed itself. Without `reviewer_login` set, the request
+stays forever and every subsequent push re-triggers a full review. To get a
+fresh review later, just re-request the review; that fires a new
 `review_requested` event instead of re-applying a label.
 
-Requires the reviewer account to be a collaborator with at least `read`
-access to the repo — `triage` is enough.
+Requires the reviewer account to be an actual collaborator (not just
+implicit public-repo read access) with at least `read`/`triage` permission —
+otherwise it won't show up in GitHub's reviewer picker at all.
 
 ## Inputs
 
@@ -150,6 +157,8 @@ access to the repo — `triage` is enough.
 | `prompt_extra` | No | `""` | Additional instructions appended to core prompt |
 | `trigger_label` | No | `claudius-review` | Label to remove on success |
 | `remove_label_on_success` | No | `true` | Whether to remove trigger label |
+| `reviewer_login` | No | `""` | GitHub login to clear from pending review requests on success (review-request trigger mode only). No-op when empty |
+| `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
 | `checkout` | No | `true` | Whether action handles git checkout |
 | `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true) |
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
