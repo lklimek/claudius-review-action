@@ -31,9 +31,13 @@ inputs:
     required: false
     default: ""
   claude_agent:
-    description: "Claude agent persona"
+    description: "Main-thread Claude agent. The default is the lightweight coordinator shipped with this action (claude/agents). With a plugin agent such as claudius:claudius, its frontmatter model may take precedence over the model input."
     required: false
-    default: "claudius:claudius"
+    default: "claudius-ci-reviewer"
+  model:
+    description: "Model for the main (coordinator) thread, e.g. sonnet or opus. Written into the bundled coordinator agent's frontmatter and also passed as --model. Reviewer sub-agents always use the per-role models assigned by claudius:grumpy-review. Empty = Claude Code's default (ANTHROPIC_MODEL)."
+    required: false
+    default: "sonnet"
   plugins:
     description: "Newline-separated plugin list"
     required: false
@@ -83,17 +87,17 @@ inputs:
     required: false
     default: "false"
   checkout:
-    description: "Whether action handles git checkout"
+    description: "Whether action handles git checkout. If false, check out the PR head with enough history to reach origin/<base branch> (e.g. fetch-depth: 0) yourself."
     required: false
     default: "true"
   fetch_depth:
-    description: "Git fetch depth (only if checkout=true)"
+    description: "Git fetch depth (only if checkout=true). Reviewers diff against origin/<base branch>, so keep the default 0 (full history) or deep enough to reach the merge base."
     required: false
     default: "0"
   allowed_tools:
     description: "Tool allowlist for Claude"
     required: false
-    default: "mcp__plugin_claudius_github,mcp__plugin_claudius_github__pull_request_read,mcp__plugin_claudius_github__pull_request_review_write,mcp__plugin_claudius_github__add_reply_to_pull_request_comment,Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git pull *),Bash(git checkout *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(mktemp *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-post-review.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
+    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),Bash(*merge_findings_helper.py *),Bash(*lint_ephemeral_ids.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -102,11 +106,36 @@ inputs:
     description: "Artifact retention days"
     required: false
     default: "14"
+  upload_transcripts:
+    description: >-
+      Upload Claude Code session transcripts (coordinator + sub-agents) as a
+      workflow artifact. WARNING: transcripts contain raw tool output; anyone
+      who can download this run's artifacts can read them, hence they are
+      always GPG-encrypted and transcripts_recipients is required.
+    required: false
+    default: "false"
+  transcript_retention_days:
+    description: "Retention days for the transcripts artifact"
+    required: false
+    default: "7"
+  transcripts_recipients:
+    description: >-
+      Newline-separated GPG public keys that transcripts are encrypted to:
+      github:<login> (that user's keys from github.com/<login>.gpg), an
+      https:// URL to an ASCII-armored public key, or a key fingerprint
+      (fetched from keys.openpgp.org; full 40-hex fingerprint only). Only
+      public keys are needed, no secret. Required when upload_transcripts
+      is true — the action fails rather than upload transcripts unencrypted.
+    required: false
+    default: ""
 
 outputs:
   report_artifact_name:
     description: "Name of the uploaded review report artifact"
     value: claude-review-report-pr-${{ github.event.pull_request.number }}
+  transcripts_artifact_name:
+    description: "Name of the uploaded Claude Code transcripts artifact (when upload_transcripts is true)"
+    value: claude-transcripts-pr-${{ github.event.pull_request.number }}
 
 runs:
   using: composite
@@ -114,10 +143,20 @@ runs:
     - name: Validate authentication
       shell: bash
       run: |
-        if [ -z "${{ inputs.anthropic_api_key }}" ] && [ -z "${{ inputs.claude_code_oauth_token }}" ]; then
+        if [ -z "$ANTHROPIC_API_KEY_IN" ] && [ -z "$CLAUDE_OAUTH_TOKEN_IN" ]; then
           echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
           exit 1
         fi
+        if [ "${{ inputs.upload_transcripts }}" = "true" ] && [ -z "$(echo "$TRANSCRIPTS_RECIPIENTS" | xargs)" ]; then
+          echo "::error::upload_transcripts is enabled but transcripts_recipients is empty. Transcripts are never uploaded unencrypted: set transcripts_recipients (e.g. github:<login>) or upload_transcripts: false."
+          exit 1
+        fi
+      env:
+        # Secrets go through env, never ${{ }} in the script body (which would
+        # write them in cleartext into the step's temp script file).
+        ANTHROPIC_API_KEY_IN: ${{ inputs.anthropic_api_key }}
+        CLAUDE_OAUTH_TOKEN_IN: ${{ inputs.claude_code_oauth_token }}
+        TRANSCRIPTS_RECIPIENTS: ${{ inputs.transcripts_recipients }}
 
     - name: Verify triggering actor has write access
       shell: bash
@@ -174,22 +213,11 @@ runs:
     - name: Pre-flight checks
       shell: bash
       run: |
-        if [ -n "${{ inputs.memcan_url }}" ] && [ -n "${{ inputs.memcan_api_key }}" ]; then
-          {
-            echo 'MEMCAN_PROMPT<<MEMCAN_EOF'
-            echo 'MemCan persistent memory is available. Use memcan:recall at session start to load project context.'
-            echo 'Use memcan:lessons-learned only if the review found MEDIUM or higher severity findings worth remembering.'
-            echo 'When spawning agents, pass MemCan context from recall results in their prompts.'
-            echo 'MEMCAN_EOF'
-          } >> "$GITHUB_ENV"
+        if [ -n "$MEMCAN_URL_IN" ] && [ -n "$MEMCAN_API_KEY_IN" ]; then
+          echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
         else
           echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
-          {
-            echo 'MEMCAN_PROMPT<<MEMCAN_EOF'
-            echo 'MemCan is NOT available — skip memcan:recall, memcan:lessons-learned, and all mcp__plugin_memcan_brain__* tools.'
-            echo 'When spawning agents, instruct them to not use memcan tools.'
-            echo 'MEMCAN_EOF'
-          } >> "$GITHUB_ENV"
+          echo "MEMCAN_AVAILABLE=false" >> "$GITHUB_ENV"
         fi
         echo "::group::Claude Code environment"
         echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-<not set>}"
@@ -202,11 +230,18 @@ runs:
         echo "CLAUDE_CODE_DISABLE_1M_CONTEXT=${CLAUDE_CODE_DISABLE_1M_CONTEXT:-<not set>}"
         echo "::endgroup::"
 
+      env:
+        MEMCAN_URL_IN: ${{ inputs.memcan_url }}
+        MEMCAN_API_KEY_IN: ${{ inputs.memcan_api_key }}
     - name: Checkout
       if: inputs.checkout == 'true'
-      uses: actions/checkout@v6
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
+        # Check out the PR head (not the merge commit) so the workspace HEAD is
+        # exactly head_sha: line numbers match what review comments anchor to.
+        ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: ${{ inputs.fetch_depth }}
+        persist-credentials: false
 
     - name: Configure git HTTPS
       shell: bash
@@ -249,14 +284,69 @@ runs:
           pip3 install --break-system-packages --quiet nh3
         fi
 
-    - name: Create report directory
+    - name: Create report directories
       shell: bash
       run: |
-        mkdir -p "${{ github.workspace }}/review-report"
+        mkdir -p "${{ github.workspace }}/review-report" "${{ runner.temp }}/claudius-review"
         echo "REPORT_DIR=${{ github.workspace }}/review-report" >> "$GITHUB_ENV"
 
+    - name: Install review skill and coordinator agent
+      shell: bash
+      run: |
+        # User-level (~/.claude) skills/agents are loaded by claude-code-action
+        # (settingSources includes "user"), and stay out of the reviewed repo.
+        MODEL="${INPUT_MODEL:-inherit}"
+        if ! [[ "$MODEL" =~ ^[A-Za-z0-9._@:-]+(\[[A-Za-z0-9]+\])?$ ]]; then
+          echo "::error::Invalid model input: '${MODEL}'"
+          exit 1
+        fi
+        mkdir -p "$HOME/.claude/skills" "$HOME/.claude/agents"
+        cp -r "${GITHUB_ACTION_PATH}/claude/skills/." "$HOME/.claude/skills/"
+        for f in "${GITHUB_ACTION_PATH}"/claude/agents/*.md; do
+          sed "s|__MODEL__|${MODEL}|" "$f" > "$HOME/.claude/agents/$(basename "$f")"
+        done
+      env:
+        INPUT_MODEL: ${{ inputs.model }}
+
+    - name: Pre-compute PR diff and hunk ranges
+      shell: bash
+      run: |
+        # Reviewers read pr.diff instead of re-running per-file git diff, and
+        # the coordinator validates inline-comment lines against diff-ranges.txt
+        # (new-side "<path> <start>-<end>" per hunk) instead of re-reading diffs.
+        S="${{ runner.temp }}/claudius-review"
+        if ! git diff "origin/${BASE_REF}...HEAD" > "$S/pr.diff" 2>/dev/null; then
+          rm -f "$S/pr.diff" "$S/diff-ranges.txt"
+          echo "::warning::Could not diff against origin/${BASE_REF} (base not fetched?) — reviewers fall back to git diff."
+          exit 0
+        fi
+        awk '
+          /^\+\+\+ / { path = substr($0, 7); next }
+          /^@@ / {
+            split($3, a, ","); start = substr(a[1], 2); len = (a[2] == "" ? 1 : a[2])
+            if (len > 0 && path != "/dev/null") print path, start "-" (start + len - 1)
+          }' "$S/pr.diff" > "$S/diff-ranges.txt"
+        echo "pr.diff: $(wc -l < "$S/pr.diff") lines, $(wc -l < "$S/diff-ranges.txt") hunks"
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+
+    - name: Count open review threads
+      id: threads
+      shell: bash
+      run: |
+        # Lets the review skip check-pr-comments entirely on a PR with no open threads.
+        OPEN=$(gh api graphql \
+          -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{isResolved}}}}}' \
+          -f o="${GITHUB_REPOSITORY%/*}" -f r="${GITHUB_REPOSITORY#*/}" -F n="${{ github.event.pull_request.number }}" \
+          --jq '.data.repository.pullRequest.reviewThreads | if .totalCount > 100 then "unknown" else ([.nodes[] | select(.isResolved | not)] | length) end' \
+          || echo unknown)
+        echo "open=${OPEN}" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
     - name: Run Claude Code Review
-      uses: anthropics/claude-code-action@v1
+      id: claude
+      uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de  # v1.0.231
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
@@ -278,81 +368,25 @@ runs:
         plugin_marketplaces: ${{ inputs.plugin_marketplaces }}
         plugins: ${{ inputs.plugins }}
         prompt: |
-          You are reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
-          Base branch: ${{ github.event.pull_request.base.ref }}
-          Head branch: ${{ github.event.pull_request.head.ref }}
-          PR title: ${{ github.event.pull_request.title }}
+          Invoke Skill(skill="ci-pr-review") and follow it exactly.
 
-          ${{ env.MEMCAN_PROMPT }}
-
-          Use MCP tools (mcp__plugin_claudius_github__*) for GitHub operations. If an MCP call fails, fall back to gh CLI.
-
-          Sub-agents have no conversation history —
-          pass all relevant PR context explicitly when spawning them.
-
-          This is a single-shot headless run: once your turn ends this process exits and nothing
-          resumes you later — there is no later turn for a completion notification to reach you.
-          You may still spawn agents in the background for concurrency, but you are the foreground
-          monitor for them: after dispatching, call TaskOutput(task_id=..., block=true) for every
-          agent you spawned and wait for its actual result before proceeding. Never end your turn
-          (e.g. with a "sit tight, I'll report back once the crew returns" message) while any
-          dispatched agent has not yet been collected — an uncollected agent is abandoned
-          permanently, and any step that depended on it (consolidation, report writing, posting
-          comments) will silently never happen. Do not end your turn until report.json has
-          actually been written and findings have been posted.
-
-          TaskOutput can time out and return before an agent is actually done (you'll see
-          something like status:running in its result instead of a final answer) — that is NOT
-          completion. On a timeout, call TaskOutput again for the same task_id and keep re-blocking
-          until you get the agent's real result. Never treat a timed-out TaskOutput call as
-          "collected" and move on. This rule applies transitively: any specialist agent you spawn
-          (e.g. via claudius:grumpy-review) that itself spawns further sub-agents is bound by the
-          same rule — tell it so explicitly in its own spawn prompt, since it has no way to know
-          it's running headless otherwise.
-
-          Do NOT create temporary directories (mktemp). Use REPORT_DIR env var for report output.
-
-          Write all PR comments in Claudius persona — witty, confident, subtly snarky,
-          but always respectful and genuinely helpful, as if advising a trusted colleague.
-
-          If MemCan is available, invoke Skill(skill="memcan:recall") to load project context.
-
-          Follow this review flow in order. Steps 1 and 2 MUST use the Skill tool —
-          do NOT skip them or perform their work manually.
-
-          1. Invoke Skill(skill="claudius:check-pr-comments") to check previous review comments.
-             For each thread that IS fixed but NOT yet resolved, reply describing the fix
-             and resolve the thread.
-          2. Invoke Skill(skill="claudius:grumpy-review") to perform a fresh code review.
-             This spawns parallel specialist agents and produces a consolidated report.
-             Do NOT review the code yourself — the skill handles the full pipeline.
-             Generate HTML format instead of markdown (use --format html in the render step).
-             REPORT_DIR is pre-set to ${{ github.workspace }}/review-report — write report.json and report.html there. Do NOT create temp directories for reports.
-
-             This job runs in an ephemeral sandbox with no warm Rust build cache, so any
-             `cargo test`/`cargo build` here always pays a full cold compile — unlike a
-             persistent dev machine. Tell claudius:grumpy-review explicitly (and it must relay
-             this to qa-engineer-marvin) to skip full `cargo test`/`cargo build` execution as
-             verification in this environment: this repository's own CI pipeline already runs
-             the full test suite on this PR as the verification backstop. Prefer static
-             verification instead — reading code, `cargo check`/`clippy` only if fast, git
-             history, grep. An agent that can't verify a claim without compiling should report
-             it as unverified rather than paying the cold-compile cost.
-          3. Post only MEDIUM severity and higher findings as new inline PR comments.
-             When submitting the review (via `pull_request_review_write` or `gh-post-review.sh`),
-             ALWAYS set a non-empty summary `body` — e.g. a one-line overall assessment plus
-             finding count, even when every finding is carried as an inline comment. NEVER submit
-             a review with inline comments but a blank/omitted body: GitHub's review-update API
-             permanently refuses to add a body later to a review that was created with none
-             (422 "Could not edit a review with a missing body"), which breaks the report-link
-             step below.
-          4. If no unresolved comments remain after the full flow, approve the PR — again with a
-             non-empty summary body (e.g. "No unresolved findings — approved.").
+          Run context (literal values — use verbatim, never as shell variables):
+          - repo: ${{ github.repository }}
+          - pr: ${{ github.event.pull_request.number }}
+          - base_ref: ${{ github.event.pull_request.base.ref }}
+          - head_sha: ${{ github.event.pull_request.head.sha }}
+          - report_dir: ${{ github.workspace }}/review-report
+          - scratch_dir: ${{ runner.temp }}/claudius-review
+          - memcan: ${{ env.MEMCAN_AVAILABLE }}
+          - open_review_threads: ${{ steps.threads.outputs.open }}
 
           ${{ inputs.prompt_extra }}
         claude_args: >-
           --agent ${{ inputs.claude_agent }}
+          ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
+          --add-dir ${{ runner.temp }}/claudius-review
           --allowedTools "${{ inputs.allowed_tools }}"
+          --disallowedTools "SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
           ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}
@@ -362,13 +396,89 @@ runs:
     - name: Upload review report
       id: upload-report
       if: '!cancelled()'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: claude-review-report-pr-${{ github.event.pull_request.number }}
         path: |
           ${{ github.workspace }}/review-report/report.json
           ${{ github.workspace }}/review-report/report.html
         retention-days: ${{ inputs.report_retention_days }}
+        if-no-files-found: ignore
+
+    - name: Collect Claude Code transcripts
+      id: transcripts
+      if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}
+      # A transcript failure must not skip posting the report link / cleanup;
+      # plaintext is still never uploaded (the output dir stays empty).
+      continue-on-error: true
+      shell: bash
+      run: |
+        RAW="${{ runner.temp }}/claude-transcripts-raw"
+        OUT="${{ runner.temp }}/claude-transcripts"
+        mkdir -p "$RAW" "$OUT"
+        # Coordinator + sub-agent session logs (JSONL) and the execution log.
+        [ -d "$HOME/.claude/projects" ] && cp -r "$HOME/.claude/projects" "$RAW/"
+        [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ] && cp "$EXECUTION_FILE" "$RAW/"
+        if [ -z "$(ls -A "$RAW")" ]; then
+          echo "::warning::upload_transcripts is enabled but no Claude Code transcripts were found — nothing uploaded."
+          exit 0
+        fi
+
+        # Throwaway keyring holding only the recipients' public keys.
+        export GNUPGHOME="${{ runner.temp }}/transcripts-gnupg"
+        mkdir -p -m 700 "$GNUPGHOME"
+        fail() { echo "::error::$1 — transcripts NOT uploaded."; exit 1; }
+        nkeys() { gpg --batch --with-colons --list-keys 2>/dev/null | grep -c '^pub' || true; }
+        while IFS= read -r line; do
+          line="$(echo "$line" | xargs)"
+          [ -z "$line" ] && continue
+          # Every recipient line must contribute at least one key: github.com/<login>.gpg
+          # answers 200 with an empty body for users without a GPG key.
+          before=$(nkeys)
+          case "$line" in
+            github:*)
+              curl -fsSL "https://github.com/${line#github:}.gpg" | gpg --batch --quiet --import \
+                || fail "Could not import GPG keys of GitHub user '${line#github:}'" ;;
+            https://*)
+              curl -fsSL "$line" | gpg --batch --quiet --import \
+                || fail "Could not import GPG key from ${line}" ;;
+            *)
+              [[ "$line" =~ ^[0-9A-Fa-f]{40}$ ]] \
+                || fail "'${line}' is not a full 40-hex-digit fingerprint (short key IDs are collision-prone)"
+              gpg --batch --quiet --keyserver hkps://keys.openpgp.org --recv-keys "$line" \
+                || fail "Could not fetch GPG key ${line} from keys.openpgp.org" ;;
+          esac
+          [ "$(nkeys)" -gt "$before" ] || fail "Recipient '${line}' yielded no GPG key"
+        done <<< "$TRANSCRIPTS_RECIPIENTS"
+
+        # The throwaway keyring holds only the keys imported above, so it IS the
+        # recipient list. Keep primary keys that are not expired/revoked/disabled
+        # and can encrypt (capability field contains "E").
+        mapfile -t FPRS < <(gpg --batch --with-colons --list-keys \
+          | awk -F: '$1=="pub"{p=($2 !~ /[erdn]/ && $12 ~ /E/);next} $1=="fpr"&&p{print $10;p=0}')
+        [ "${#FPRS[@]}" -gt 0 ] || fail "No usable GPG public keys imported"
+        RCPT_ARGS=()
+        for f in "${FPRS[@]}"; do RCPT_ARGS+=(--recipient "$f"); done
+
+        # Never fall back to plaintext: on failure OUT stays empty.
+        tar czf - -C "$RAW" . \
+          | gpg --batch --yes --trust-model always "${RCPT_ARGS[@]}" \
+              --output "$OUT/claude-transcripts.tar.gz.gpg" --encrypt \
+          || { rm -f "$OUT/claude-transcripts.tar.gz.gpg"; fail "Transcript encryption failed"; }
+        echo "Transcripts encrypted to ${#FPRS[@]} GPG key(s): ${FPRS[*]}"
+      env:
+        EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        TRANSCRIPTS_RECIPIENTS: ${{ inputs.transcripts_recipients }}
+
+    - name: Upload Claude Code transcripts
+      if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: claude-transcripts-pr-${{ github.event.pull_request.number }}
+        path: ${{ runner.temp }}/claude-transcripts
+        retention-days: ${{ inputs.transcript_retention_days }}
+        include-hidden-files: true
+        overwrite: true
         if-no-files-found: ignore
 
     - name: Verify review report was produced
@@ -391,9 +501,10 @@ runs:
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Find the last review by claude[bot]
-        REVIEW_ID=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-          --jq '[.[] | select(.user.login == "claude[bot]")] | last | .id // empty')
+        # Find the last review posted by the review bot (claude[bot] when using
+        # the Claude GitHub App token, github-actions[bot] with GITHUB_TOKEN).
+        REVIEW_ID=$(gh api --paginate "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+          --jq '.[] | select(.user.login == "claude[bot]" or .user.login == "github-actions[bot]") | .id' | tail -n1)
         BODY=""
         if [ -n "$REVIEW_ID" ]; then
           BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
@@ -442,3 +553,12 @@ runs:
           || echo "::warning::Failed to remove the pending review request for '${{ inputs.reviewer_login }}'. It will stay on the PR, which will re-trigger a full review on the next push — check that the token has pull-requests write access."
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Fail on transcript upload error
+      # Runs last so a transcript failure never skips the report link or cleanup
+      # above, but still turns the job red instead of hiding in a green run.
+      if: ${{ !cancelled() && steps.transcripts.outcome == 'failure' }}
+      shell: bash
+      run: |
+        echo "::error::Collecting/encrypting Claude Code transcripts failed — nothing was uploaded. See the 'Collect Claude Code transcripts' step."
+        exit 1

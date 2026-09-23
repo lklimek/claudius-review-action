@@ -30,7 +30,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v1
+      - uses: lklimek/claudius-review-action@v2
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -63,13 +63,15 @@ jobs:
       pull-requests: write
       id-token: write
     env:
-      ANTHROPIC_MODEL: sonnet
       CLAUDE_CODE_MAX_TURNS: "200"
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
-      - uses: lklimek/claudius-review-action@v1
+      - uses: lklimek/claudius-review-action@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: sonnet
+          upload_transcripts: "true"
+          transcripts_recipients: github:your-login
           memcan_url: ${{ secrets.MEMCAN_URL }}
           memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
           trigger_label: ai-review
@@ -117,7 +119,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v1
+      - uses: lklimek/claudius-review-action@v2
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           remove_label_on_success: false
@@ -148,6 +150,27 @@ pushed on `synchronize`), not the reviewer being requested. If that person
 or bot doesn't have `write`/`admin` access, add them to
 `allowed_non_write_users` the same way you would for the label trigger.
 
+## How It Works
+
+The action installs a small `ci-pr-review` skill and `claudius-ci-reviewer`
+agent (from [`claude/`](claude)) into the runner's `~/.claude`, then asks
+Claude to run that skill. The skill:
+
+1. runs `claudius:check-pr-comments` — replies to and resolves threads that
+   are already fixed;
+2. runs `claudius:grumpy-review` with CI overrides — reviewers are spawned
+   **one at a time** (`sonnet` reviewers first, then `opus`; the remaining ones
+   are skipped as soon as one reports a HIGH+ or blocking finding), do **static review only** (no builds, tests or
+   reproduction attempts; unconfirmed findings are reported, not dropped),
+   and a report is **always** written, even when nothing was found;
+3. posts MEDIUM+ findings as inline comments via `gh`, and approves the PR
+   when nothing is left unresolved.
+
+All GitHub access goes through the `gh` CLI (no GitHub MCP server).
+
+This repository reviews its own non-draft PRs with the PR's version of the
+action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).
+
 ## Inputs
 
 | Input | Required | Default | Description |
@@ -158,7 +181,8 @@ or bot doesn't have `write`/`admin` access, add them to
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
 | `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |
-| `claude_agent` | No | `claudius:claudius` | Claude agent persona |
+| `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](claude/agents); a plugin agent (e.g. `claudius:claudius`) uses its own frontmatter model instead of `model` |
+| `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:grumpy-review`. Empty = Claude Code default |
 | `plugins` | No | `claudius@lklimek`, `claudash@lklimek`, `memcan@lklimek` | Newline-separated plugin list |
 | `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
 | `prompt_extra` | No | `""` | Additional instructions appended to core prompt |
@@ -166,11 +190,14 @@ or bot doesn't have `write`/`admin` access, add them to
 | `remove_label_on_success` | No | `true` | Whether to remove trigger label |
 | `reviewer_login` | No | `""` | GitHub login to clear from pending review requests on success (review-request trigger mode only). No-op when empty |
 | `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
-| `checkout` | No | `true` | Whether action handles git checkout |
-| `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true) |
+| `checkout` | No | `true` | Whether action handles git checkout (the PR head commit). If `false`, check out the PR head yourself with enough history to reach `origin/<base>` |
+| `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true). Reviewers diff against `origin/<base>`, so keep `0` or deep enough to reach the merge base |
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
+| `upload_transcripts` | No | `false` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as a GPG-encrypted artifact. Requires `transcripts_recipients` — the action fails instead of uploading plaintext |
+| `transcript_retention_days` | No | `7` | Retention days for the transcripts artifact |
+| `transcripts_recipients` | No | `""` | Newline-separated GPG public keys to encrypt transcripts to: `github:<login>` (keys from `github.com/<login>.gpg`), an `https://` URL to an armored key, or a fingerprint (from keys.openpgp.org). Full 40-hex fingerprints only. Public keys only — no secret needed. Decrypt: `gpg -d claude-transcripts.tar.gz.gpg \| tar xz` |
 | `debug_output` | No | `false` | Show full raw Claude Code JSON output in the job log. Also turns on automatically when GitHub's "Enable debug logging" re-run checkbox is checked. **WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting**, and be aware that checkbox trips the same warning |
 
 At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
@@ -198,7 +225,7 @@ Use a comma-separated list for multiple accounts, or `*` to allow any actor
 
 ## Claude Code Environment Variables
 
-Claude Code behavior (model, effort, turns, etc.) is controlled via environment variables set at the **workflow level**. The action's pre-flight step logs all recognized variables — check the "Claude Code environment" group in the workflow output for the effective configuration.
+Claude Code behavior (effort, turns, etc.) is controlled via environment variables set at the **workflow level** — except the coordinator model, which is the `model` input (see below). The action's pre-flight step logs all recognized variables — check the "Claude Code environment" group in the workflow output for the effective configuration.
 
 Set them in your workflow's `env:` block:
 
@@ -206,17 +233,20 @@ Set them in your workflow's `env:` block:
 jobs:
   review:
     env:
-      ANTHROPIC_MODEL: opus
       CLAUDE_CODE_MAX_TURNS: "150"
       CLAUDE_CODE_EFFORT_LEVEL: high
-      CLAUDE_CODE_SUBAGENT_MODEL: sonnet
 ```
+
+The coordinator model is set by the `model` input (default `sonnet`), not by
+`ANTHROPIC_MODEL`. Reviewer sub-agents get their models per role from
+`claudius:grumpy-review`; leave `CLAUDE_CODE_SUBAGENT_MODEL` unset.
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
 | `report_artifact_name` | Name of the uploaded review report artifact |
+| `transcripts_artifact_name` | Name of the uploaded transcripts artifact (when `upload_transcripts` is `true`) |
 
 ## Required Permissions
 
@@ -230,7 +260,7 @@ permissions:
 
 ## Learn Action
 
-The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v1`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
+The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v2`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
 
 ### Quick Start
 
@@ -251,7 +281,7 @@ jobs:
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
-      - uses: lklimek/claudius-review-action/learn@v1
+      - uses: lklimek/claudius-review-action/learn@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           memcan_url: ${{ secrets.MEMCAN_URL }}

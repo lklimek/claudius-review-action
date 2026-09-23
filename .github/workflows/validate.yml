@@ -13,24 +13,27 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate action.yml against GitHub Action schema
         run: |
-          pip install --quiet check-jsonschema
-          check-jsonschema --schemafile "https://json.schemastore.org/github-action.json" action.yml
+          # pipx gives an isolated venv; a --user pip install picks up the
+          # runner's preinstalled click, which newer check-jsonschema rejects.
+          pipx run check-jsonschema --schemafile "https://json.schemastore.org/github-action.json" action.yml
 
       - name: Lint example workflows
         run: |
           curl -sL "$(curl -sL https://api.github.com/repos/rhysd/actionlint/releases/latest \
             | jq -r '.assets[] | select(.name | test("linux_amd64.tar.gz$")) | .browser_download_url')" \
             | tar xz -C /usr/local/bin actionlint
-          actionlint examples/*.yml
+          actionlint examples/*.yml .github/workflows/*.yml
 
       - name: Check YAML document markers
         run: |
           status=0
-          for f in action.yml examples/*.yml; do
+          for f in action.yml examples/*.yml .github/workflows/claudius-review.yml; do
             if ! head -1 "$f" | grep -q '^---'; then
               echo "::error file=$f::Missing YAML document marker (---) at start of file"
               status=1

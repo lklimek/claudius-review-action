@@ -1,0 +1,46 @@
+---
+# Dogfooding: reviews every non-draft PR in this repo using the action code
+# from the PR itself (`uses: ./`), so each PR also tests its own changes.
+name: Claudius Self-Review
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Fork and Dependabot PRs get no repo secrets on pull_request, so skip them
+    # instead of failing.
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout PR (provides the action under test)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Review with this PR's version of the action
+        uses: ./
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          memcan_url: ${{ vars.MEMCAN_URL }}
+          memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
+          checkout: "false"
+          remove_label_on_success: "false"
+          upload_transcripts: "true"
+          transcripts_recipients: github:lklimek
