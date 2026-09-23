@@ -97,7 +97,7 @@ inputs:
   allowed_tools:
     description: "Tool allowlist for Claude"
     required: false
-    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),Bash(*merge_findings_helper.py *),Bash(*lint_ephemeral_ids.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
+    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),Bash(*merge_findings_helper.py *),Bash(*lint_ephemeral_ids.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -308,6 +308,28 @@ runs:
       env:
         INPUT_MODEL: ${{ inputs.model }}
 
+    - name: Pre-compute PR diff and hunk ranges
+      shell: bash
+      run: |
+        # Reviewers read pr.diff instead of re-running per-file git diff, and
+        # the coordinator validates inline-comment lines against diff-ranges.txt
+        # (new-side "<path> <start>-<end>" per hunk) instead of re-reading diffs.
+        S="${{ runner.temp }}/claudius-review"
+        if ! git diff "origin/${BASE_REF}...HEAD" > "$S/pr.diff" 2>/dev/null; then
+          rm -f "$S/pr.diff" "$S/diff-ranges.txt"
+          echo "::warning::Could not diff against origin/${BASE_REF} (base not fetched?) — reviewers fall back to git diff."
+          exit 0
+        fi
+        awk '
+          /^\+\+\+ / { path = substr($0, 7); next }
+          /^@@ / {
+            split($3, a, ","); start = substr(a[1], 2); len = (a[2] == "" ? 1 : a[2])
+            if (len > 0 && path != "/dev/null") print path, start "-" (start + len - 1)
+          }' "$S/pr.diff" > "$S/diff-ranges.txt"
+        echo "pr.diff: $(wc -l < "$S/pr.diff") lines, $(wc -l < "$S/diff-ranges.txt") hunks"
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+
     - name: Count open review threads
       id: threads
       shell: bash
@@ -364,6 +386,7 @@ runs:
           ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           --add-dir ${{ runner.temp }}/claudius-review
           --allowedTools "${{ inputs.allowed_tools }}"
+          --disallowedTools "SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
           ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}
