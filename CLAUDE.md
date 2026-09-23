@@ -35,7 +35,7 @@ README.md
 The flow lives in the `ci-pr-review` skill (`claude/skills/ci-pr-review/SKILL.md`); the prompt in `action.yml` only invokes it. Keep flow instructions in the skill, not the prompt.
 
 1. `claudius:check-pr-comments` — check and resolve previous review threads
-2. `claudius:grumpy-review` — sequential (sonnet first, then opus; stops early on the first HIGH+/blocking finding), static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
+2. `claudius:grumpy-review` — sequential (`sonnet` first, then `opus`; stops early on the first HIGH+/blocking finding), static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
 3. Post MEDIUM+ findings as inline PR comments via `gh api`
 4. Approve PR if no unresolved issues remain
 
