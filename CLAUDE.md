@@ -35,7 +35,7 @@ README.md
 The flow lives in the `ci-pr-review` skill (`claude/skills/ci-pr-review/SKILL.md`); the prompt in `action.yml` only invokes it. Keep flow instructions in the skill, not the prompt.
 
 1. `claudius:check-pr-comments` — check and resolve previous review threads
-2. `claudius:grumpy-review` — sequential (`sonnet` first, then `opus`; stops early on the first HIGH+/blocking finding), static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
+2. `claudius:grumpy-review` — all reviewers in parallel, static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
 3. Post MEDIUM+ findings as inline PR comments via `gh api`
 4. Approve PR if no unresolved issues remain
 
@@ -46,7 +46,7 @@ Steps 1 and 2 MUST use the `Skill` tool — never perform their work manually. G
 When improving this action's performance, apply these criteria in priority order. "Without losing review quality" is a hard constraint across all three.
 
 1. **Decrease number of rounds** (highest priority) — minimize conversation turns between Claude and tools. Prefer skills/agents that batch their own operations over multiple sequential tool calls from the orchestrator.
-2. **Decrease running time** (second priority) — reduce wall-clock time of the GitHub Actions job. Avoid redundant checkouts or API calls. Exception: reviewer agents run sequentially on purpose (owner decision) — sonnet first, then opus, stopping at the first HIGH+/blocking finding — trading wall-clock for lower cost: a PR with a serious defect never pays for the remaining reviewers. Do not parallelize them.
+2. **Decrease running time** (second priority) — reduce wall-clock time of the GitHub Actions job. Avoid redundant checkouts or API calls. Reviewer agents run in parallel (all spawned in one round, foreground) — they dominate wall-clock time.
 3. **Decrease number of tokens** (third priority) — reduce token consumption. Trim prompt verbosity, avoid passing large context that is not needed, prefer targeted `gh` calls over broad reads.
 
 ## Conventions
