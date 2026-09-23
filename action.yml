@@ -311,15 +311,21 @@ runs:
       run: |
         # User-level (~/.claude) skills/agents are loaded by claude-code-action
         # (settingSources includes "user"), and stay out of the reviewed repo.
-        MODEL="${INPUT_MODEL:-inherit}"
-        if ! [[ "$MODEL" =~ ^[A-Za-z0-9._@:-]+(\[[A-Za-z0-9]+\])?$ ]]; then
+        MODEL="${INPUT_MODEL}"
+        if [ -n "$MODEL" ] && ! [[ "$MODEL" =~ ^[A-Za-z0-9._@:-]+(\[[A-Za-z0-9]+\])?$ ]]; then
           echo "::error::Invalid model input: '${MODEL}'"
           exit 1
         fi
         mkdir -p "$HOME/.claude/skills" "$HOME/.claude/agents"
         cp -r "${GITHUB_ACTION_PATH}/claude/skills/." "$HOME/.claude/skills/"
         for f in "${GITHUB_ACTION_PATH}"/claude/agents/*.md; do
-          sed "s|__MODEL__|${MODEL}|" "$f" > "$HOME/.claude/agents/$(basename "$f")"
+          # Empty model: drop the line so the main thread uses Claude Code's
+          # default ("inherit" has no parent session to inherit from here).
+          if [ -n "$MODEL" ]; then
+            sed "s|__MODEL__|${MODEL}|" "$f"
+          else
+            sed "/^model: __MODEL__$/d" "$f"
+          fi > "$HOME/.claude/agents/$(basename "$f")"
         done
       env:
         INPUT_MODEL: ${{ inputs.model }}
