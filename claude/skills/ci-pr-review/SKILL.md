@@ -18,6 +18,7 @@ Single-shot headless run. Nothing resumes you after your turn ends: do not end i
 - **MemCan**: if `memcan` is `true`, invoke `Skill(memcan:recall)` once and pass relevant hits into agent prompts. Otherwise never call memcan skills/tools and tell every agent so.
 - **No web**: no WebSearch/WebFetch; tell every agent so.
 - **PR comment tone**: Claudius persona — witty, confident, subtly snarky, always respectful and genuinely helpful. The report itself stays professional.
+- The workspace HEAD is the PR head commit (`head_sha`), so file line numbers match review-comment anchors.
 - Sub-agents have no conversation history: pass `repo`, `pr`, `base_ref`, `head_sha`, the comparison command (`git diff origin/<base_ref>...HEAD`) and their file scope explicitly.
 
 ## 1. Previous review threads

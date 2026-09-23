@@ -225,7 +225,7 @@ Use a comma-separated list for multiple accounts, or `*` to allow any actor
 
 ## Claude Code Environment Variables
 
-Claude Code behavior (model, effort, turns, etc.) is controlled via environment variables set at the **workflow level**. The action's pre-flight step logs all recognized variables — check the "Claude Code environment" group in the workflow output for the effective configuration.
+Claude Code behavior (effort, turns, etc.) is controlled via environment variables set at the **workflow level** — except the coordinator model, which is the `model` input (see below). The action's pre-flight step logs all recognized variables — check the "Claude Code environment" group in the workflow output for the effective configuration.
 
 Set them in your workflow's `env:` block:
 

@@ -55,7 +55,7 @@ When improving this action's performance, apply these criteria in priority order
 - `anthropics/claude-code-action@v1` is the execution engine; this repo only provides the prompt, inputs, and pre/post steps
 - Plugin-based architecture: claudius, claudash, memcan — loaded via `plugins` input
 - Auth: dual-mode — either `anthropic_api_key` or `claude_code_oauth_token` must be provided
-- Claude Code behavior (model, effort, max turns) is controlled via env vars set in the caller's workflow, not in this action
+- Claude Code behavior (effort, max turns) is controlled via env vars set in the caller's workflow; the coordinator model is the `model` input (templated into the bundled agent), reviewer models come from `claudius:grumpy-review`
 - `learn/` is WIP — the interface is unstable, do not treat it as production-ready
 
 ## Development

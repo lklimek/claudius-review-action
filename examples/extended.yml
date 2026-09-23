@@ -28,9 +28,10 @@ jobs:
       - uses: lklimek/claudius-review-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_model: sonnet
-          max_turns: 200
+          model: sonnet
           trigger_label: ai-review
+          upload_transcripts: "true"
+          transcripts_recipients: github:your-login
           report_retention_days: "30"
           prompt_extra: |
             Focus especially on security issues and SQL injection vectors.

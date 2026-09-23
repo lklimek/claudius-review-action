@@ -91,7 +91,7 @@ inputs:
     required: false
     default: "true"
   fetch_depth:
-    description: "Git fetch depth (only if checkout=true)"
+    description: "Git fetch depth (only if checkout=true). Reviewers diff against origin/<base branch>, so keep the default 0 (full history) or deep enough to reach the merge base."
     required: false
     default: "0"
   allowed_tools:
@@ -143,7 +143,7 @@ runs:
     - name: Validate authentication
       shell: bash
       run: |
-        if [ -z "${{ inputs.anthropic_api_key }}" ] && [ -z "${{ inputs.claude_code_oauth_token }}" ]; then
+        if [ -z "$ANTHROPIC_API_KEY_IN" ] && [ -z "$CLAUDE_OAUTH_TOKEN_IN" ]; then
           echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
           exit 1
         fi
@@ -152,6 +152,10 @@ runs:
           exit 1
         fi
       env:
+        # Secrets go through env, never ${{ }} in the script body (which would
+        # write them in cleartext into the step's temp script file).
+        ANTHROPIC_API_KEY_IN: ${{ inputs.anthropic_api_key }}
+        CLAUDE_OAUTH_TOKEN_IN: ${{ inputs.claude_code_oauth_token }}
         TRANSCRIPTS_RECIPIENTS: ${{ inputs.transcripts_recipients }}
 
     - name: Verify triggering actor has write access
@@ -209,7 +213,7 @@ runs:
     - name: Pre-flight checks
       shell: bash
       run: |
-        if [ -n "${{ inputs.memcan_url }}" ] && [ -n "${{ inputs.memcan_api_key }}" ]; then
+        if [ -n "$MEMCAN_URL_IN" ] && [ -n "$MEMCAN_API_KEY_IN" ]; then
           echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
         else
           echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
@@ -226,10 +230,16 @@ runs:
         echo "CLAUDE_CODE_DISABLE_1M_CONTEXT=${CLAUDE_CODE_DISABLE_1M_CONTEXT:-<not set>}"
         echo "::endgroup::"
 
+      env:
+        MEMCAN_URL_IN: ${{ inputs.memcan_url }}
+        MEMCAN_API_KEY_IN: ${{ inputs.memcan_api_key }}
     - name: Checkout
       if: inputs.checkout == 'true'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
+        # Check out the PR head (not the merge commit) so the workspace HEAD is
+        # exactly head_sha: line numbers match what review comments anchor to.
+        ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: ${{ inputs.fetch_depth }}
         persist-credentials: false
 
@@ -386,7 +396,7 @@ runs:
         [ -d "$HOME/.claude/projects" ] && cp -r "$HOME/.claude/projects" "$RAW/"
         [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ] && cp "$EXECUTION_FILE" "$RAW/"
         if [ -z "$(ls -A "$RAW")" ]; then
-          echo "No transcripts found."
+          echo "::warning::upload_transcripts is enabled but no Claude Code transcripts were found — nothing uploaded."
           exit 0
         fi
 
