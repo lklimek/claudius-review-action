@@ -148,6 +148,26 @@ pushed on `synchronize`), not the reviewer being requested. If that person
 or bot doesn't have `write`/`admin` access, add them to
 `allowed_non_write_users` the same way you would for the label trigger.
 
+## How It Works
+
+The action installs a small `ci-pr-review` skill and `claudius-ci-reviewer`
+agent (from [`claude/`](claude)) into the runner's `~/.claude`, then asks
+Claude to run that skill. The skill:
+
+1. runs `claudius:check-pr-comments` — replies to and resolves threads that
+   are already fixed;
+2. runs `claudius:grumpy-review` with CI overrides — reviewers are spawned
+   **one at a time**, do **static review only** (no builds, tests or
+   reproduction attempts; unconfirmed findings are reported, not dropped),
+   and a report is **always** written, even when nothing was found;
+3. posts MEDIUM+ findings as inline comments via `gh`, and approves the PR
+   when nothing is left unresolved.
+
+All GitHub access goes through the `gh` CLI (no GitHub MCP server).
+
+This repository reviews its own non-draft PRs with the PR's version of the
+action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).
+
 ## Inputs
 
 | Input | Required | Default | Description |
@@ -158,7 +178,8 @@ or bot doesn't have `write`/`admin` access, add them to
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
 | `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |
-| `claude_agent` | No | `claudius:claudius` | Claude agent persona |
+| `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](claude/agents); a plugin agent (e.g. `claudius:claudius`) uses its own frontmatter model instead of `model` |
+| `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:grumpy-review`. Empty = Claude Code default |
 | `plugins` | No | `claudius@lklimek`, `claudash@lklimek`, `memcan@lklimek` | Newline-separated plugin list |
 | `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
 | `prompt_extra` | No | `""` | Additional instructions appended to core prompt |
@@ -171,6 +192,8 @@ or bot doesn't have `write`/`admin` access, add them to
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
+| `upload_transcripts` | No | `true` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as an artifact. **Transcripts contain raw tool output — anyone who can download the run's artifacts can read them** |
+| `transcript_retention_days` | No | `7` | Retention days for the transcripts artifact |
 | `debug_output` | No | `false` | Show full raw Claude Code JSON output in the job log. Also turns on automatically when GitHub's "Enable debug logging" re-run checkbox is checked. **WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting**, and be aware that checkbox trips the same warning |
 
 At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
@@ -209,14 +232,18 @@ jobs:
       ANTHROPIC_MODEL: opus
       CLAUDE_CODE_MAX_TURNS: "150"
       CLAUDE_CODE_EFFORT_LEVEL: high
-      CLAUDE_CODE_SUBAGENT_MODEL: sonnet
 ```
+
+The coordinator model is set by the `model` input (default `sonnet`), which
+overrides `ANTHROPIC_MODEL`. Reviewer sub-agents get their models per role from
+`claudius:grumpy-review`; leave `CLAUDE_CODE_SUBAGENT_MODEL` unset.
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
 | `report_artifact_name` | Name of the uploaded review report artifact |
+| `transcripts_artifact_name` | Name of the uploaded transcripts artifact (when `upload_transcripts` is `true`) |
 
 ## Required Permissions
 

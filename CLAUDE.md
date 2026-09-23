@@ -12,6 +12,11 @@ Published at: `lklimek/claudius-review-action`
 
 ```
 action.yml              # Main composite action (PR review)
+claude/
+  skills/ci-pr-review/  # Review flow instructions (installed into ~/.claude/skills)
+  agents/               # Coordinator agent (installed into ~/.claude/agents; __MODEL__ templated)
+.github/workflows/
+  claudius-review.yml   # Self-review of every non-draft PR using `uses: ./`
 learn/
   action.yml            # Post-merge learning extraction (WIP — do not touch without asking)
   shared/
@@ -27,22 +32,22 @@ README.md
 
 ## Review Flow
 
-The main `action.yml` drives Claude through this sequence (via hardcoded prompt):
+The flow lives in the `ci-pr-review` skill (`claude/skills/ci-pr-review/SKILL.md`); the prompt in `action.yml` only invokes it. Keep flow instructions in the skill, not the prompt.
 
 1. `claudius:check-pr-comments` — check and resolve previous review threads
-2. `claudius:grumpy-review` — run parallel specialist agents, produce consolidated report
-3. Post MEDIUM+ findings as inline PR comments
+2. `claudius:grumpy-review` — sequential, static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
+3. Post MEDIUM+ findings as inline PR comments via `gh api`
 4. Approve PR if no unresolved issues remain
 
-Steps 1 and 2 MUST use the `Skill` tool — never perform their work manually.
+Steps 1 and 2 MUST use the `Skill` tool — never perform their work manually. GitHub access is `gh` CLI only (claudius no longer ships a GitHub MCP server).
 
 ## Optimization Criteria
 
 When improving this action's performance, apply these criteria in priority order. "Without losing review quality" is a hard constraint across all three.
 
 1. **Decrease number of rounds** (highest priority) — minimize conversation turns between Claude and tools. Prefer skills/agents that batch their own operations over multiple sequential tool calls from the orchestrator.
-2. **Decrease running time** (second priority) — reduce wall-clock time of the GitHub Actions job. Favor parallel agent execution, avoid redundant checkouts or API calls.
-3. **Decrease number of tokens** (third priority) — reduce token consumption. Trim prompt verbosity, avoid passing large context that is not needed, prefer targeted MCP calls over broad reads.
+2. **Decrease running time** (second priority) — reduce wall-clock time of the GitHub Actions job. Avoid redundant checkouts or API calls. Reviewer agents run sequentially by design (see Review Flow) — do not parallelize them.
+3. **Decrease number of tokens** (third priority) — reduce token consumption. Trim prompt verbosity, avoid passing large context that is not needed, prefer targeted `gh` calls over broad reads.
 
 ## Conventions
 
