@@ -26,9 +26,10 @@ jobs:
       id-token: write
     steps:
       - name: Checkout PR (provides the action under test)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Review with this PR's version of the action
         uses: ./
@@ -38,4 +39,5 @@ jobs:
           memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
           checkout: "false"
           remove_label_on_success: "false"
+          upload_transcripts: "true"
           transcripts_recipients: github:lklimek

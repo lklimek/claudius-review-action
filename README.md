@@ -63,13 +63,15 @@ jobs:
       pull-requests: write
       id-token: write
     env:
-      ANTHROPIC_MODEL: sonnet
       CLAUDE_CODE_MAX_TURNS: "200"
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
       - uses: lklimek/claudius-review-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: sonnet
+          upload_transcripts: "true"
+          transcripts_recipients: github:your-login
           memcan_url: ${{ secrets.MEMCAN_URL }}
           memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
           trigger_label: ai-review
@@ -193,9 +195,9 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
-| `upload_transcripts` | No | `true` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as an artifact. **Transcripts contain raw tool output — anyone who can download the run's artifacts can read them** |
+| `upload_transcripts` | No | `false` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as a GPG-encrypted artifact. Requires `transcripts_recipients` — the action fails instead of uploading plaintext |
 | `transcript_retention_days` | No | `7` | Retention days for the transcripts artifact |
-| `transcripts_recipients` | No | `""` | Newline-separated GPG public keys to encrypt transcripts to: `github:<login>` (keys from `github.com/<login>.gpg`), an `https://` URL to an armored key, or a fingerprint (from keys.openpgp.org). Public keys only — no secret needed. Empty = unencrypted upload with a warning. Decrypt: `gpg -d claude-transcripts.tar.gz.gpg \| tar xz` |
+| `transcripts_recipients` | No | `""` | Newline-separated GPG public keys to encrypt transcripts to: `github:<login>` (keys from `github.com/<login>.gpg`), an `https://` URL to an armored key, or a fingerprint (from keys.openpgp.org). Full 40-hex fingerprints only. Public keys only — no secret needed. Decrypt: `gpg -d claude-transcripts.tar.gz.gpg \| tar xz` |
 | `debug_output` | No | `false` | Show full raw Claude Code JSON output in the job log. Also turns on automatically when GitHub's "Enable debug logging" re-run checkbox is checked. **WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting**, and be aware that checkbox trips the same warning |
 
 At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
@@ -231,13 +233,12 @@ Set them in your workflow's `env:` block:
 jobs:
   review:
     env:
-      ANTHROPIC_MODEL: opus
       CLAUDE_CODE_MAX_TURNS: "150"
       CLAUDE_CODE_EFFORT_LEVEL: high
 ```
 
-The coordinator model is set by the `model` input (default `sonnet`), which
-overrides `ANTHROPIC_MODEL`. Reviewer sub-agents get their models per role from
+The coordinator model is set by the `model` input (default `sonnet`), not by
+`ANTHROPIC_MODEL`. Reviewer sub-agents get their models per role from
 `claudius:grumpy-review`; leave `CLAUDE_CODE_SUBAGENT_MODEL` unset.
 
 ## Outputs

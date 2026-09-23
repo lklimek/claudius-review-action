@@ -31,11 +31,11 @@ inputs:
     required: false
     default: ""
   claude_agent:
-    description: "Main-thread Claude agent. The default is the lightweight coordinator shipped with this action (claude/agents), whose model comes from the model input. A plugin agent such as claudius:claudius runs on its own frontmatter model instead."
+    description: "Main-thread Claude agent. The default is the lightweight coordinator shipped with this action (claude/agents). With a plugin agent such as claudius:claudius, its frontmatter model may take precedence over the model input."
     required: false
     default: "claudius-ci-reviewer"
   model:
-    description: "Model for the main (coordinator) thread, e.g. sonnet or opus. Reviewer sub-agents always use the per-role models assigned by claudius:grumpy-review. Empty = inherit Claude Code's default (ANTHROPIC_MODEL)."
+    description: "Model for the main (coordinator) thread, e.g. sonnet or opus. Written into the bundled coordinator agent's frontmatter and also passed as --model. Reviewer sub-agents always use the per-role models assigned by claudius:grumpy-review. Empty = Claude Code's default (ANTHROPIC_MODEL)."
     required: false
     default: "sonnet"
   plugins:
@@ -97,7 +97,7 @@ inputs:
   allowed_tools:
     description: "Tool allowlist for Claude"
     required: false
-    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git pull *),Bash(git checkout *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(mktemp *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),Bash(*merge_findings_helper.py *),Bash(*lint_ephemeral_ids.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
+    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,SendMessage,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),Bash(*merge_findings_helper.py *),Bash(*lint_ephemeral_ids.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -110,9 +110,10 @@ inputs:
     description: >-
       Upload Claude Code session transcripts (coordinator + sub-agents) as a
       workflow artifact. WARNING: transcripts contain raw tool output; anyone
-      who can download this run's artifacts can read them.
+      who can download this run's artifacts can read them, hence they are
+      always GPG-encrypted and transcripts_recipients is required.
     required: false
-    default: "true"
+    default: "false"
   transcript_retention_days:
     description: "Retention days for the transcripts artifact"
     required: false
@@ -122,9 +123,9 @@ inputs:
       Newline-separated GPG public keys that transcripts are encrypted to:
       github:<login> (that user's keys from github.com/<login>.gpg), an
       https:// URL to an ASCII-armored public key, or a key fingerprint
-      (fetched from keys.openpgp.org). Only public keys are needed, no
-      secret. When empty, transcripts are uploaded unencrypted (with a
-      warning).
+      (fetched from keys.openpgp.org; full 40-hex fingerprint only). Only
+      public keys are needed, no secret. Required when upload_transcripts
+      is true — the action fails rather than upload transcripts unencrypted.
     required: false
     default: ""
 
@@ -146,6 +147,12 @@ runs:
           echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
           exit 1
         fi
+        if [ "${{ inputs.upload_transcripts }}" = "true" ] && [ -z "$(echo "$TRANSCRIPTS_RECIPIENTS" | xargs)" ]; then
+          echo "::error::upload_transcripts is enabled but transcripts_recipients is empty. Transcripts are never uploaded unencrypted: set transcripts_recipients (e.g. github:<login>) or upload_transcripts: false."
+          exit 1
+        fi
+      env:
+        TRANSCRIPTS_RECIPIENTS: ${{ inputs.transcripts_recipients }}
 
     - name: Verify triggering actor has write access
       shell: bash
@@ -221,9 +228,10 @@ runs:
 
     - name: Checkout
       if: inputs.checkout == 'true'
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         fetch-depth: ${{ inputs.fetch_depth }}
+        persist-credentials: false
 
     - name: Configure git HTTPS
       shell: bash
@@ -271,24 +279,42 @@ runs:
       run: |
         mkdir -p "${{ github.workspace }}/review-report" "${{ runner.temp }}/claudius-review"
         echo "REPORT_DIR=${{ github.workspace }}/review-report" >> "$GITHUB_ENV"
-        echo "SCRATCH_DIR=${{ runner.temp }}/claudius-review" >> "$GITHUB_ENV"
 
     - name: Install review skill and coordinator agent
       shell: bash
       run: |
         # User-level (~/.claude) skills/agents are loaded by claude-code-action
         # (settingSources includes "user"), and stay out of the reviewed repo.
+        MODEL="${INPUT_MODEL:-inherit}"
+        if ! [[ "$MODEL" =~ ^[A-Za-z0-9._@:-]+(\[[A-Za-z0-9]+\])?$ ]]; then
+          echo "::error::Invalid model input: '${MODEL}'"
+          exit 1
+        fi
         mkdir -p "$HOME/.claude/skills" "$HOME/.claude/agents"
         cp -r "${GITHUB_ACTION_PATH}/claude/skills/." "$HOME/.claude/skills/"
-        MODEL="${INPUT_MODEL:-inherit}"
-        sed "s/__MODEL__/${MODEL}/" "${GITHUB_ACTION_PATH}/claude/agents/claudius-ci-reviewer.md" \
-          > "$HOME/.claude/agents/claudius-ci-reviewer.md"
+        for f in "${GITHUB_ACTION_PATH}"/claude/agents/*.md; do
+          sed "s|__MODEL__|${MODEL}|" "$f" > "$HOME/.claude/agents/$(basename "$f")"
+        done
       env:
         INPUT_MODEL: ${{ inputs.model }}
 
+    - name: Count open review threads
+      id: threads
+      shell: bash
+      run: |
+        # Lets the review skip check-pr-comments entirely on a PR with no open threads.
+        OPEN=$(gh api graphql \
+          -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){totalCount nodes{isResolved}}}}}' \
+          -f o="${GITHUB_REPOSITORY%/*}" -f r="${GITHUB_REPOSITORY#*/}" -F n="${{ github.event.pull_request.number }}" \
+          --jq '.data.repository.pullRequest.reviewThreads | if .totalCount > 100 then "unknown" else ([.nodes[] | select(.isResolved | not)] | length) end' \
+          || echo unknown)
+        echo "open=${OPEN}" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
     - name: Run Claude Code Review
       id: claude
-      uses: anthropics/claude-code-action@v1
+      uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de  # v1.0.231
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
@@ -310,27 +336,34 @@ runs:
         plugin_marketplaces: ${{ inputs.plugin_marketplaces }}
         plugins: ${{ inputs.plugins }}
         prompt: |
-          Review PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
           Invoke Skill(skill="ci-pr-review") and follow it exactly.
+
+          Run context (literal values — use verbatim, never as shell variables):
+          - repo: ${{ github.repository }}
+          - pr: ${{ github.event.pull_request.number }}
+          - base_ref: ${{ github.event.pull_request.base.ref }}
+          - head_sha: ${{ github.event.pull_request.head.sha }}
+          - report_dir: ${{ github.workspace }}/review-report
+          - scratch_dir: ${{ runner.temp }}/claudius-review
+          - memcan: ${{ env.MEMCAN_AVAILABLE }}
+          - open_review_threads: ${{ steps.threads.outputs.open }}
 
           ${{ inputs.prompt_extra }}
         claude_args: >-
           --agent ${{ inputs.claude_agent }}
           ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
+          --add-dir ${{ runner.temp }}/claudius-review
           --allowedTools "${{ inputs.allowed_tools }}"
           ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        BASE_REF: ${{ github.event.pull_request.base.ref }}
-        HEAD_REF: ${{ github.event.pull_request.head.ref }}
         MEMCAN_URL: ${{ inputs.memcan_url }}
         MEMCAN_API_KEY: ${{ inputs.memcan_api_key }}
 
     - name: Upload review report
       id: upload-report
       if: '!cancelled()'
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: claude-review-report-pr-${{ github.event.pull_request.number }}
         path: |
@@ -341,6 +374,9 @@ runs:
 
     - name: Collect Claude Code transcripts
       if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}
+      # A transcript failure must not skip posting the report link / cleanup;
+      # plaintext is still never uploaded (the output dir stays empty).
+      continue-on-error: true
       shell: bash
       run: |
         RAW="${{ runner.temp }}/claude-transcripts-raw"
@@ -351,12 +387,6 @@ runs:
         [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ] && cp "$EXECUTION_FILE" "$RAW/"
         if [ -z "$(ls -A "$RAW")" ]; then
           echo "No transcripts found."
-          exit 0
-        fi
-
-        if [ -z "$(echo "$TRANSCRIPTS_RECIPIENTS" | xargs)" ]; then
-          echo "::warning::transcripts_recipients is empty — uploading transcripts UNENCRYPTED. Anyone who can download this run's artifacts can read them."
-          cp -r "$RAW/." "$OUT/"
           exit 0
         fi
 
@@ -375,14 +405,18 @@ runs:
               curl -fsSL "$line" | gpg --batch --quiet --import \
                 || fail "Could not import GPG key from ${line}" ;;
             *)
+              [[ "$line" =~ ^[0-9A-Fa-f]{40}$ ]] \
+                || fail "'${line}' is not a full 40-hex-digit fingerprint (short key IDs are collision-prone)"
               gpg --batch --quiet --keyserver hkps://keys.openpgp.org --recv-keys "$line" \
                 || fail "Could not fetch GPG key ${line} from keys.openpgp.org" ;;
           esac
         done <<< "$TRANSCRIPTS_RECIPIENTS"
 
-        # Primary-key fingerprints of every imported key.
+        # The throwaway keyring holds only the keys imported above, so it IS the
+        # recipient list. Keep primary keys that are not expired/revoked/disabled
+        # and can encrypt (capability field contains "E").
         mapfile -t FPRS < <(gpg --batch --with-colons --list-keys \
-          | awk -F: '$1=="pub"{p=1;next} $1=="fpr"&&p{print $10;p=0}')
+          | awk -F: '$1=="pub"{p=($2 !~ /[erdn]/ && $12 ~ /E/);next} $1=="fpr"&&p{print $10;p=0}')
         [ "${#FPRS[@]}" -gt 0 ] || fail "No usable GPG public keys imported"
         RCPT_ARGS=()
         for f in "${FPRS[@]}"; do RCPT_ARGS+=(--recipient "$f"); done
@@ -399,7 +433,7 @@ runs:
 
     - name: Upload Claude Code transcripts
       if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: claude-transcripts-pr-${{ github.event.pull_request.number }}
         path: ${{ runner.temp }}/claude-transcripts
