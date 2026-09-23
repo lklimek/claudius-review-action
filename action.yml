@@ -119,11 +119,12 @@ inputs:
     default: "7"
   transcripts_recipients:
     description: >-
-      Newline-separated age recipients that transcripts are encrypted to:
-      age public keys (age1...), SSH public keys (ssh-ed25519/ssh-rsa), or
-      github:<login> to use that user's SSH keys from github.com/<login>.keys.
-      Only public keys are needed, no secret. When empty, transcripts are
-      uploaded unencrypted (with a warning).
+      Newline-separated GPG public keys that transcripts are encrypted to:
+      github:<login> (that user's keys from github.com/<login>.gpg), an
+      https:// URL to an ASCII-armored public key, or a key fingerprint
+      (fetched from keys.openpgp.org). Only public keys are needed, no
+      secret. When empty, transcripts are uploaded unencrypted (with a
+      warning).
     required: false
     default: ""
 
@@ -353,33 +354,45 @@ runs:
           exit 0
         fi
 
-        # Build the age recipients file; github:<login> expands to that user's SSH keys.
-        RCPT="${{ runner.temp }}/transcripts-recipients.txt"
-        : > "$RCPT"
-        while IFS= read -r line; do
-          line="$(echo "$line" | xargs)"
-          case "$line" in
-            "") ;;
-            github:*)
-              login="${line#github:}"
-              curl -fsSL "https://github.com/${login}.keys" >> "$RCPT" \
-                || { echo "::error::Could not fetch SSH keys for GitHub user '${login}'."; exit 1; }
-              ;;
-            *) echo "$line" >> "$RCPT" ;;
-          esac
-        done <<< "$TRANSCRIPTS_RECIPIENTS"
-
-        if [ ! -s "$RCPT" ]; then
+        if [ -z "$(echo "$TRANSCRIPTS_RECIPIENTS" | xargs)" ]; then
           echo "::warning::transcripts_recipients is empty — uploading transcripts UNENCRYPTED. Anyone who can download this run's artifacts can read them."
           cp -r "$RAW/." "$OUT/"
           exit 0
         fi
 
-        command -v age >/dev/null || sudo apt-get install -y -qq --no-install-recommends age
-        # Never fall back to plaintext: on any failure below, OUT stays empty.
-        tar czf - -C "$RAW" . | age -R "$RCPT" -o "$OUT/claude-transcripts.tar.gz.age" \
-          || { rm -f "$OUT/claude-transcripts.tar.gz.age"; echo "::error::Transcript encryption failed — nothing uploaded."; exit 1; }
-        echo "Transcripts encrypted to $(grep -c . "$RCPT") recipient key(s)."
+        # Throwaway keyring holding only the recipients' public keys.
+        export GNUPGHOME="${{ runner.temp }}/transcripts-gnupg"
+        mkdir -p -m 700 "$GNUPGHOME"
+        fail() { echo "::error::$1 — transcripts NOT uploaded."; exit 1; }
+        while IFS= read -r line; do
+          line="$(echo "$line" | xargs)"
+          case "$line" in
+            "") ;;
+            github:*)
+              curl -fsSL "https://github.com/${line#github:}.gpg" | gpg --batch --quiet --import \
+                || fail "Could not import GPG keys of GitHub user '${line#github:}'" ;;
+            https://*)
+              curl -fsSL "$line" | gpg --batch --quiet --import \
+                || fail "Could not import GPG key from ${line}" ;;
+            *)
+              gpg --batch --quiet --keyserver hkps://keys.openpgp.org --recv-keys "$line" \
+                || fail "Could not fetch GPG key ${line} from keys.openpgp.org" ;;
+          esac
+        done <<< "$TRANSCRIPTS_RECIPIENTS"
+
+        # Primary-key fingerprints of every imported key.
+        mapfile -t FPRS < <(gpg --batch --with-colons --list-keys \
+          | awk -F: '$1=="pub"{p=1;next} $1=="fpr"&&p{print $10;p=0}')
+        [ "${#FPRS[@]}" -gt 0 ] || fail "No usable GPG public keys imported"
+        RCPT_ARGS=()
+        for f in "${FPRS[@]}"; do RCPT_ARGS+=(--recipient "$f"); done
+
+        # Never fall back to plaintext: on failure OUT stays empty.
+        tar czf - -C "$RAW" . \
+          | gpg --batch --yes --trust-model always "${RCPT_ARGS[@]}" \
+              --output "$OUT/claude-transcripts.tar.gz.gpg" --encrypt \
+          || { rm -f "$OUT/claude-transcripts.tar.gz.gpg"; fail "Transcript encryption failed"; }
+        echo "Transcripts encrypted to ${#FPRS[@]} GPG key(s): ${FPRS[*]}"
       env:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         TRANSCRIPTS_RECIPIENTS: ${{ inputs.transcripts_recipients }}
