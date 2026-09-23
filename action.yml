@@ -224,10 +224,10 @@ runs:
           # only) instead of as a silent "failed to connect" inside Claude.
           URL="${MEMCAN_URL_IN%/}"
           HEALTH=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/health" || true)
-          case "$URL" in
-            http://localhost*|http://127.0.0.1*|http://\[::1\]*|https://*) ;;
-            *) echo "::warning::memcan_url uses plain HTTP to a non-local host — the MemCan API key travels unencrypted. Put the server behind HTTPS." ;;
-          esac
+          # Anchored: "http://localhost.attacker.example" must not count as local.
+          if ! [[ "$URL" =~ ^https:// || "$URL" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$ ]]; then
+            echo "::warning::memcan_url uses plain HTTP to a non-local host — the MemCan API key travels unencrypted. Put the server behind HTTPS."
+          fi
           # Headers go to stdout (-D -), body is discarded; last line = status code.
           RESP=$(curl -s -o /dev/null -D - -w '\n%{http_code}' --max-time 15 -X POST "$URL/mcp" \
             -H "Authorization: Bearer ${MEMCAN_API_KEY_IN}" \
@@ -396,7 +396,19 @@ runs:
         DENY+=",Bash(*/../*),Bash(git * /*),Bash(git * ~*),Bash(git *../*),Bash(git -c *),Bash(git -C *),Bash(git *--no-index*),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
         DENY+=",Read(//proc/**),Read(//sys/**),Read(/${W}/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
         echo "CLAUDE_ALLOWED_TOOLS=${ALLOW}" >> "$GITHUB_ENV"
+        # No shell expansion at all: an allowed command could otherwise echo
+        # secrets from the environment ($VAR, ${VAR}, `cmd`).
+        DENY+=',Bash(*$*),Bash(*`*)'
         echo "CLAUDE_DISALLOWED_TOOLS=${DENY}" >> "$GITHUB_ENV"
+        # Reads are fenced to the working directories (workspace + --add-dir):
+        # scratch, the plugin cache (reviewers read claudius sources) and the
+        # session projects dir (Claude re-reads oversized tool results there).
+        echo "CLAUDE_PLUGIN_CACHE=$HOME/.claude/plugins/cache" >> "$GITHUB_ENV"
+        echo "CLAUDE_PROJECTS_DIR=$HOME/.claude/projects" >> "$GITHUB_ENV"
+        mkdir -p "$HOME/.claude/plugins/cache" "$HOME/.claude/projects"
+        SETTINGS="$HOME/.claude/settings.json"
+        [ -s "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+        jq '.permissions.blockReadsOutsideWorkingDirectories = true' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
         echo "::group::Tool permissions"; echo "allow: ${ALLOW}"; echo "deny: ${DENY}"; echo "::endgroup::"
       env:
         ALLOWED_TOOLS_IN: ${{ inputs.allowed_tools }}
@@ -456,6 +468,8 @@ runs:
           --agent ${{ inputs.claude_agent }}
           ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           --add-dir ${{ runner.temp }}/claudius-review
+          --add-dir ${{ env.CLAUDE_PLUGIN_CACHE }}
+          --add-dir ${{ env.CLAUDE_PROJECTS_DIR }}
           --allowedTools "${{ env.CLAUDE_ALLOWED_TOOLS }}"
           --disallowedTools "${{ env.CLAUDE_DISALLOWED_TOOLS }}"
           ${{ inputs.claude_extra_args }}
