@@ -26,7 +26,8 @@ Context (env): `PR_NUMBER`, `GITHUB_REPOSITORY`, `BASE_REF`, `HEAD_REF`, `REPORT
 
 `Skill(claudius:grumpy-review)` — never review the code yourself. CI overrides below take precedence over the skill text:
 
-1. **Sequential**: spawn reviewers one at a time, in the foreground (never `run_in_background`); wait for each result before spawning the next. In the roster, state peers run before/after it, not concurrently.
+1. **Sequential**: spawn reviewers one at a time, in the foreground (never `run_in_background`); wait for each result before spawning the next. Order: `sonnet` reviewers first, then `opus` ones. In the roster, state peers run before/after it, not concurrently.
+   **Early stop**: after each reviewer returns, read its findings file. If any finding is HIGH or CRITICAL severity, or blocking (trips a `claudius:severity` blocker gate), spawn no further reviewers — go straight to consolidation with the findings collected so far, and note in the executive summary which reviewers were skipped and why.
 2. **Models**: exactly as grumpy-review assigns per role (§2/§4) — always pass `model` on each `Agent` call. No uniform override.
 3. **Static only** — put this verbatim in every spawn prompt:
    > Static review only. Never build, compile, run tests, linters, benchmarks or the application, and never install packages. Do not try to reproduce findings: report each one with evidence from reading the code, the diff and git history; mark unconfirmed findings as such (lower confidence) instead of dropping them. Do not create worktrees or check out other refs.

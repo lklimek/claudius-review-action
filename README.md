@@ -157,7 +157,8 @@ Claude to run that skill. The skill:
 1. runs `claudius:check-pr-comments` — replies to and resolves threads that
    are already fixed;
 2. runs `claudius:grumpy-review` with CI overrides — reviewers are spawned
-   **one at a time**, do **static review only** (no builds, tests or
+   **one at a time** (Sonnet reviewers first, then Opus; the remaining ones
+   are skipped as soon as one reports a HIGH+ or blocking finding), do **static review only** (no builds, tests or
    reproduction attempts; unconfirmed findings are reported, not dropped),
    and a report is **always** written, even when nothing was found;
 3. posts MEDIUM+ findings as inline comments via `gh`, and approves the PR
