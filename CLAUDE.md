@@ -68,17 +68,13 @@ Test the action by referencing it from a workflow in another repo:
 
 Or reference a local path with `act` for local runner testing.
 
-Validate YAML syntax before pushing:
+CI (`.github/workflows/`): `validate.yml` checks `action.yml` against the GitHub Action schema and runs actionlint on workflows/examples; `claudius-review.yml` reviews every non-draft PR with the PR's own version of the action (`uses: ./`). Run the same checks locally before pushing (`check-jsonschema`, `actionlint`, `yamllint`).
 
-```bash
-yamllint action.yml learn/action.yml
-```
-
-There is no plugin manifest or CI pipeline in this repo. Changes take effect when the action ref is updated in caller workflows.
+Changes take effect when the action ref is updated in caller workflows.
 
 ## Versioning
 
-Tag releases as `vX.Y.Z` following [SemVer 2](https://semver.org/). The `learn` sub-action is versioned together with the root action.
+Tag releases as `vX.Y.Z` following [SemVer 2](https://semver.org/), and move the major alias tag (`vX`, e.g. `v2`) to the same commit — README and examples reference the major alias. The `learn` sub-action is versioned together with the root action.
 
 - **Major**: breaking input/output changes, removed inputs, changed review flow behavior
 - **Minor**: new inputs (with defaults), new post-processing steps, new features
