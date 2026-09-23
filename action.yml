@@ -214,7 +214,23 @@ runs:
       shell: bash
       run: |
         if [ -n "$MEMCAN_URL_IN" ] && [ -n "$MEMCAN_API_KEY_IN" ]; then
-          echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
+          # Probe the server the plugin's HTTP MCP config will use, so an
+          # unreachable server or a rejected key shows up here (status codes
+          # only) instead of as a silent "failed to connect" inside Claude.
+          URL="${MEMCAN_URL_IN%/}"
+          HEALTH=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/health" || true)
+          INIT=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST "$URL/mcp" \
+            -H "Authorization: Bearer ${MEMCAN_API_KEY_IN}" \
+            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claudius-review-action-preflight","version":"1"}}}' \
+            || true)
+          echo "MemCan preflight: GET /health -> ${HEALTH:-000}, POST /mcp initialize -> ${INIT:-000}"
+          if [ "$INIT" = "200" ]; then
+            echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::MemCan server not usable (health ${HEALTH:-000}, MCP initialize ${INIT:-000}; 000 = unreachable/timeout, 401/403 = key rejected or IP blocked). Continuing without MemCan."
+            echo "MEMCAN_AVAILABLE=false" >> "$GITHUB_ENV"
+          fi
         else
           echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
           echo "MEMCAN_AVAILABLE=false" >> "$GITHUB_ENV"
