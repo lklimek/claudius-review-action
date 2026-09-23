@@ -391,7 +391,9 @@ runs:
           fi
         fi
         DENY="SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
-        DENY+=",Bash(*/../*),Bash(git -c *),Bash(git -C *),Bash(git *--no-index*),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
+        # git diff enters no-index mode on its own when a path lies outside the repo,
+        # so git may never see absolute, home-relative or parent-relative paths.
+        DENY+=",Bash(*/../*),Bash(git * /*),Bash(git * ~*),Bash(git *../*),Bash(git -c *),Bash(git -C *),Bash(git *--no-index*),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
         DENY+=",Read(//proc/**),Read(//sys/**),Read(/${W}/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
         echo "CLAUDE_ALLOWED_TOOLS=${ALLOW}" >> "$GITHUB_ENV"
         echo "CLAUDE_DISALLOWED_TOOLS=${DENY}" >> "$GITHUB_ENV"
@@ -481,8 +483,11 @@ runs:
         # The review flow needs claudius >= 8.2.0 (post_pr_review.py, finalize,
         # anchored script paths). The plugin is installed inside
         # claude-code-action, so this is the earliest point it can be checked.
+        # Runs after the review: the plugin is installed inside claude-code-action,
+        # so no earlier check is possible. With several cached installs, the
+        # newest one is checked.
         V=$(cat "$HOME"/.claude/plugins/cache/*/claudius/*/.claude-plugin/plugin.json 2>/dev/null \
-          | grep -o '"version": *"[^"]*"' | head -n1 | grep -o '[0-9][0-9.]*' || true)
+          | grep -o '"version": *"[^"]*"' | grep -o '[0-9][0-9.]*' | sort -V | tail -n1 || true)
         echo "claudius plugin version: ${V:-unknown}"
         if [ -z "$V" ] || [ "$(printf '%s\n' 8.2.0 "$V" | sort -V | head -n1)" != "8.2.0" ]; then
           echo "::error::claudius ${V:-(not found)} is installed, but this action requires claudius >= 8.2.0 — check the plugins/plugin_marketplaces inputs."
