@@ -95,9 +95,14 @@ inputs:
     required: false
     default: "0"
   allowed_tools:
-    description: "Tool allowlist for Claude"
+    description: >-
+      Tool allowlist for Claude. Empty (default) = a least-privilege list
+      computed at runtime: read-only git/gh commands, the claudius plugin
+      scripts anchored to their install path, and file writes limited to the
+      scratch and report directories. Requires claudius >= 8.2.0. Setting
+      this replaces the computed list entirely.
     required: false
-    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),Bash(*merge_findings_helper.py *),Bash(*lint_ephemeral_ids.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
+    default: ""
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -219,11 +224,23 @@ runs:
           # only) instead of as a silent "failed to connect" inside Claude.
           URL="${MEMCAN_URL_IN%/}"
           HEALTH=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/health" || true)
-          INIT=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST "$URL/mcp" \
+          case "$URL" in
+            http://localhost*|http://127.0.0.1*|http://\[::1\]*|https://*) ;;
+            *) echo "::warning::memcan_url uses plain HTTP to a non-local host — the MemCan API key travels unencrypted. Put the server behind HTTPS." ;;
+          esac
+          # Headers go to stdout (-D -), body is discarded; last line = status code.
+          RESP=$(curl -s -o /dev/null -D - -w '\n%{http_code}' --max-time 15 -X POST "$URL/mcp" \
             -H "Authorization: Bearer ${MEMCAN_API_KEY_IN}" \
             -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
             -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claudius-review-action-preflight","version":"1"}}}' \
             || true)
+          INIT=$(printf '%s' "$RESP" | tail -n1)
+          SID=$(printf '%s' "$RESP" | grep -i '^mcp-session-id:' | head -n1 | cut -d: -f2- | tr -d ' \r' || true)
+          if [ -n "$SID" ]; then
+            # Close the probe's session instead of leaving it to expire server-side.
+            curl -s -o /dev/null --max-time 10 -X DELETE "$URL/mcp" \
+              -H "Authorization: Bearer ${MEMCAN_API_KEY_IN}" -H "Mcp-Session-Id: ${SID}" || true
+          fi
           echo "MemCan preflight: GET /health -> ${HEALTH:-000}, POST /mcp initialize -> ${INIT:-000}"
           if [ "$INIT" = "200" ]; then
             echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
@@ -330,27 +347,57 @@ runs:
       env:
         INPUT_MODEL: ${{ inputs.model }}
 
-    - name: Pre-compute PR diff and hunk ranges
+    - name: Pre-compute PR diff
       shell: bash
       run: |
-        # Reviewers read pr.diff instead of re-running per-file git diff, and
-        # the coordinator validates inline-comment lines against diff-ranges.txt
-        # (new-side "<path> <start>-<end>" per hunk) instead of re-reading diffs.
+        # Reviewers read pr.diff once instead of re-running per-file git diff.
         S="${{ runner.temp }}/claudius-review"
         if ! git diff "origin/${BASE_REF}...HEAD" > "$S/pr.diff" 2>/dev/null; then
-          rm -f "$S/pr.diff" "$S/diff-ranges.txt"
+          rm -f "$S/pr.diff"
           echo "::warning::Could not diff against origin/${BASE_REF} (base not fetched?) — reviewers fall back to git diff."
           exit 0
         fi
-        awk '
-          /^\+\+\+ / { path = substr($0, 7); next }
-          /^@@ / {
-            split($3, a, ","); start = substr(a[1], 2); len = (a[2] == "" ? 1 : a[2])
-            if (len > 0 && path != "/dev/null") print path, start "-" (start + len - 1)
-          }' "$S/pr.diff" > "$S/diff-ranges.txt"
-        echo "pr.diff: $(wc -l < "$S/pr.diff") lines, $(wc -l < "$S/diff-ranges.txt") hunks"
+        echo "pr.diff: $(wc -l < "$S/pr.diff") lines"
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
+
+    - name: Build tool permissions
+      shell: bash
+      run: |
+        # Least-privilege allow/deny lists. Bash rules match the literal command
+        # text, so plugin scripts are anchored to their install path; the version
+        # and marketplace segments are wildcards (the plugin is installed later,
+        # inside claude-code-action), and any "/../" is denied so the wildcards
+        # can't be used to traverse elsewhere. Edit rules also govern Write.
+        S="${{ runner.temp }}/claudius-review"
+        R="${{ github.workspace }}/review-report"
+        W="${{ github.workspace }}"
+        P="$HOME/.claude/plugins/cache/*/claudius/*/scripts"
+        if [ -n "$ALLOWED_TOOLS_IN" ]; then
+          ALLOW="$ALLOWED_TOOLS_IN"
+        else
+          ALLOW="Read,Glob,Grep,Agent,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet,Edit(/${S}/**),Edit(/${R}/**),Bash(git status)"
+          for c in "git diff" "git log" "git show" "git status" "git rev-parse" "git merge-base" "git ls-files" "git ls-tree" "gh pr view" "gh pr diff" "ls" "mkdir"; do
+            ALLOW+=",Bash(${c} *)"
+          done
+          for f in consolidate_reports validate_report generate_review_report lint_ephemeral_ids merge_findings_helper post_pr_review; do
+            ALLOW+=",Bash(python3 ${P}/${f}.py *)"
+          done
+          for f in gh-list-review-threads gh-fetch-review-comments gh-fetch-reviews gh-resolve-review-threads gh-post-review-reply gh-pr-base-sha; do
+            ALLOW+=",Bash(${P}/${f}.sh *)"
+          done
+          if [ "$MEMCAN_AVAILABLE" = "true" ]; then
+            ALLOW+=",mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__search_code,mcp__plugin_memcan_brain__search_standards"
+          fi
+        fi
+        DENY="SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
+        DENY+=",Bash(*/../*),Bash(git -c *),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
+        DENY+=",Read(//proc/**),Read(//sys/**),Read(/${W}/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
+        echo "CLAUDE_ALLOWED_TOOLS=${ALLOW}" >> "$GITHUB_ENV"
+        echo "CLAUDE_DISALLOWED_TOOLS=${DENY}" >> "$GITHUB_ENV"
+        echo "::group::Tool permissions"; echo "allow: ${ALLOW}"; echo "deny: ${DENY}"; echo "::endgroup::"
+      env:
+        ALLOWED_TOOLS_IN: ${{ inputs.allowed_tools }}
 
     - name: Count open review threads
       id: threads
@@ -407,8 +454,8 @@ runs:
           --agent ${{ inputs.claude_agent }}
           ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           --add-dir ${{ runner.temp }}/claudius-review
-          --allowedTools "${{ inputs.allowed_tools }}"
-          --disallowedTools "SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
+          --allowedTools "${{ env.CLAUDE_ALLOWED_TOOLS }}"
+          --disallowedTools "${{ env.CLAUDE_DISALLOWED_TOOLS }}"
           ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}

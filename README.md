@@ -162,10 +162,24 @@ Claude to run that skill. The skill:
    parallel**, do **static review only** (no builds, tests or
    reproduction attempts; unconfirmed findings are reported, not dropped),
    and a report is **always** written, even when nothing was found;
-3. posts MEDIUM+ findings as inline comments via `gh`, and approves the PR
-   when nothing is left unresolved.
+3. posts the review with claudius's `post_pr_review.py`, which maps findings
+   onto the diff, skips ones already raised in open threads and approves the
+   PR when nothing is left unresolved.
 
+Requires **claudius ≥ 8.2.0** (installed from the marketplace at run time).
 All GitHub access goes through the `gh` CLI (no GitHub MCP server).
+
+**Permissions.** Claude runs with a least-privilege allowlist computed per
+run: read-only `git`/`gh pr` commands, the claudius plugin scripts anchored to
+their install path, and file writes only inside the scratch and report
+directories. `gh api`, `jq`, shell interpreters, `/../` paths, git options
+that write or execute (`--output`, `--ext-diff`, `-c`, …) and credential files
+are denied. The job log shows the effective lists under "Tool permissions".
+
+**MemCan preflight.** When `memcan_url`/`memcan_api_key` are set, the action
+probes `/health` and an MCP `initialize` (status codes only, session closed
+afterwards) and continues without MemCan if the server isn't usable. It warns
+when the URL is plain HTTP to a non-local host.
 
 This repository reviews its own non-draft PRs with the PR's version of the
 action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).
@@ -191,7 +205,7 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 | `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
 | `checkout` | No | `true` | Whether action handles git checkout (the PR head commit). If `false`, check out the PR head yourself with enough history to reach `origin/<base>` |
 | `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true). Reviewers diff against `origin/<base>`, so keep `0` or deep enough to reach the merge base |
-| `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
+| `allowed_tools` | No | `""` | Tool allowlist for Claude. Empty = the computed least-privilege list (recommended); a value replaces it entirely |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
 | `upload_transcripts` | No | `false` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as a GPG-encrypted artifact. Requires `transcripts_recipients` — the action fails instead of uploading plaintext |

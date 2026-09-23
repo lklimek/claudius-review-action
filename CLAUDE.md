@@ -36,7 +36,7 @@ The flow lives in the `ci-pr-review` skill (`claude/skills/ci-pr-review/SKILL.md
 
 1. `claudius:check-pr-comments` — check and resolve previous review threads
 2. `claudius:grumpy-review` — all reviewers in parallel, static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
-3. Post MEDIUM+ findings as inline PR comments via `gh api`
+3. Post the review with claudius `post_pr_review.py` (diff mapping, open-thread dedup, APPROVE/COMMENT) — requires claudius ≥ 8.2.0
 4. Approve PR if no unresolved issues remain
 
 Steps 1 and 2 MUST use the `Skill` tool — never perform their work manually. GitHub access is `gh` CLI only (claudius no longer ships a GitHub MCP server).
