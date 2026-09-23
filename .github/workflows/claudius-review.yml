@@ -13,10 +13,12 @@ concurrency:
 
 jobs:
   review:
-    # Fork PRs get no secrets on pull_request, so skip them instead of failing.
+    # Fork and Dependabot PRs get no repo secrets on pull_request, so skip them
+    # instead of failing.
     if: >
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

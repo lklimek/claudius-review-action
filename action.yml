@@ -428,10 +428,14 @@ runs:
         export GNUPGHOME="${{ runner.temp }}/transcripts-gnupg"
         mkdir -p -m 700 "$GNUPGHOME"
         fail() { echo "::error::$1 — transcripts NOT uploaded."; exit 1; }
+        nkeys() { gpg --batch --with-colons --list-keys 2>/dev/null | grep -c '^pub' || true; }
         while IFS= read -r line; do
           line="$(echo "$line" | xargs)"
+          [ -z "$line" ] && continue
+          # Every recipient line must contribute at least one key: github.com/<login>.gpg
+          # answers 200 with an empty body for users without a GPG key.
+          before=$(nkeys)
           case "$line" in
-            "") ;;
             github:*)
               curl -fsSL "https://github.com/${line#github:}.gpg" | gpg --batch --quiet --import \
                 || fail "Could not import GPG keys of GitHub user '${line#github:}'" ;;
@@ -444,6 +448,7 @@ runs:
               gpg --batch --quiet --keyserver hkps://keys.openpgp.org --recv-keys "$line" \
                 || fail "Could not fetch GPG key ${line} from keys.openpgp.org" ;;
           esac
+          [ "$(nkeys)" -gt "$before" ] || fail "Recipient '${line}' yielded no GPG key"
         done <<< "$TRANSCRIPTS_RECIPIENTS"
 
         # The throwaway keyring holds only the keys imported above, so it IS the
