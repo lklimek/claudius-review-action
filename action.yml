@@ -117,6 +117,15 @@ inputs:
     description: "Retention days for the transcripts artifact"
     required: false
     default: "7"
+  transcripts_recipients:
+    description: >-
+      Newline-separated age recipients that transcripts are encrypted to:
+      age public keys (age1...), SSH public keys (ssh-ed25519/ssh-rsa), or
+      github:<login> to use that user's SSH keys from github.com/<login>.keys.
+      Only public keys are needed, no secret. When empty, transcripts are
+      uploaded unencrypted (with a warning).
+    required: false
+    default: ""
 
 outputs:
   report_artifact_name:
@@ -333,14 +342,47 @@ runs:
       if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}
       shell: bash
       run: |
-        DEST="${{ runner.temp }}/claude-transcripts"
-        mkdir -p "$DEST"
-        # Coordinator + sub-agent session logs (JSONL).
-        [ -d "$HOME/.claude/projects" ] && cp -r "$HOME/.claude/projects" "$DEST/"
-        [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ] && cp "$EXECUTION_FILE" "$DEST/"
-        true
+        RAW="${{ runner.temp }}/claude-transcripts-raw"
+        OUT="${{ runner.temp }}/claude-transcripts"
+        mkdir -p "$RAW" "$OUT"
+        # Coordinator + sub-agent session logs (JSONL) and the execution log.
+        [ -d "$HOME/.claude/projects" ] && cp -r "$HOME/.claude/projects" "$RAW/"
+        [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ] && cp "$EXECUTION_FILE" "$RAW/"
+        if [ -z "$(ls -A "$RAW")" ]; then
+          echo "No transcripts found."
+          exit 0
+        fi
+
+        # Build the age recipients file; github:<login> expands to that user's SSH keys.
+        RCPT="${{ runner.temp }}/transcripts-recipients.txt"
+        : > "$RCPT"
+        while IFS= read -r line; do
+          line="$(echo "$line" | xargs)"
+          case "$line" in
+            "") ;;
+            github:*)
+              login="${line#github:}"
+              curl -fsSL "https://github.com/${login}.keys" >> "$RCPT" \
+                || { echo "::error::Could not fetch SSH keys for GitHub user '${login}'."; exit 1; }
+              ;;
+            *) echo "$line" >> "$RCPT" ;;
+          esac
+        done <<< "$TRANSCRIPTS_RECIPIENTS"
+
+        if [ ! -s "$RCPT" ]; then
+          echo "::warning::transcripts_recipients is empty — uploading transcripts UNENCRYPTED. Anyone who can download this run's artifacts can read them."
+          cp -r "$RAW/." "$OUT/"
+          exit 0
+        fi
+
+        command -v age >/dev/null || sudo apt-get install -y -qq --no-install-recommends age
+        # Never fall back to plaintext: on any failure below, OUT stays empty.
+        tar czf - -C "$RAW" . | age -R "$RCPT" -o "$OUT/claude-transcripts.tar.gz.age" \
+          || { rm -f "$OUT/claude-transcripts.tar.gz.age"; echo "::error::Transcript encryption failed — nothing uploaded."; exit 1; }
+        echo "Transcripts encrypted to $(grep -c . "$RCPT") recipient key(s)."
       env:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        TRANSCRIPTS_RECIPIENTS: ${{ inputs.transcripts_recipients }}
 
     - name: Upload Claude Code transcripts
       if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}

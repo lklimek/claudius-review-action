@@ -38,3 +38,4 @@ jobs:
           memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
           checkout: "false"
           remove_label_on_success: "false"
+          transcripts_recipients: github:lklimek

@@ -194,6 +194,7 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 | `report_retention_days` | No | `14` | Artifact retention days |
 | `upload_transcripts` | No | `true` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as an artifact. **Transcripts contain raw tool output — anyone who can download the run's artifacts can read them** |
 | `transcript_retention_days` | No | `7` | Retention days for the transcripts artifact |
+| `transcripts_recipients` | No | `""` | Newline-separated [age](https://age-encryption.org) recipients to encrypt transcripts to: `age1…` keys, SSH public keys, or `github:<login>` (that user's keys from `github.com/<login>.keys`). Public keys only — no secret needed. Empty = unencrypted upload with a warning. Decrypt: `age -d -i ~/.ssh/id_ed25519 claude-transcripts.tar.gz.age \| tar xz` |
 | `debug_output` | No | `false` | Show full raw Claude Code JSON output in the job log. Also turns on automatically when GitHub's "Enable debug logging" re-run checkbox is checked. **WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting**, and be aware that checkbox trips the same warning |
 
 At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
