@@ -179,7 +179,8 @@ are denied. The job log shows the effective lists under "Tool permissions".
 **MemCan preflight.** When `memcan_url`/`memcan_api_key` are set, the action
 probes `/health` and an MCP `initialize` (status codes only, session closed
 afterwards) and continues without MemCan if the server isn't usable. It warns
-when the URL is plain HTTP to a non-local host.
+when the URL is plain HTTP to a non-local host. MemCan is read-only in CI
+(search tools only; reviews never write memories).
 
 This repository reviews its own non-draft PRs with the PR's version of the
 action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).

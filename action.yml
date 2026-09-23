@@ -225,7 +225,8 @@ runs:
           URL="${MEMCAN_URL_IN%/}"
           HEALTH=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/health" || true)
           # Anchored: "http://localhost.attacker.example" must not count as local.
-          if ! [[ "$URL" =~ ^https:// || "$URL" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$ ]]; then
+          URL_LC="${URL,,}"
+          if [[ "$URL_LC" =~ ^http:// ]] && ! [[ "$URL_LC" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$ ]]; then
             echo "::warning::memcan_url uses plain HTTP to a non-local host — the MemCan API key travels unencrypted. Put the server behind HTTPS."
           fi
           # Headers go to stdout (-D -), body is discarded; last line = status code.
@@ -374,6 +375,10 @@ runs:
         W="${{ github.workspace }}"
         P="$HOME/.claude/plugins/cache/*/claudius/*/scripts"
         if [ -n "$ALLOWED_TOOLS_IN" ]; then
+          # One line only: a newline would inject extra variables into GITHUB_ENV.
+          case "$ALLOWED_TOOLS_IN" in
+            *$'\n'*|*$'\r'*|*'"'*) echo "::error::allowed_tools must be a single line without double quotes."; exit 1 ;;
+          esac
           ALLOW="$ALLOWED_TOOLS_IN"
         else
           ALLOW="Read,Glob,Grep,Agent,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet,Edit(/${S}/**),Edit(/${R}/**),Bash(git status)"
@@ -394,11 +399,16 @@ runs:
         # git diff enters no-index mode on its own when a path lies outside the repo,
         # so git may never see absolute, home-relative or parent-relative paths.
         DENY+=",Bash(*/../*),Bash(git * /*),Bash(git * ~*),Bash(git *../*),Bash(git -c *),Bash(git -C *),Bash(git *--no-index*),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
-        DENY+=",Read(//proc/**),Read(//sys/**),Read(/${W}/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
+        # "//" = absolute path in permission rules. Plugin-cache clones carry
+        # their own .git/config.
+        DENY+=",Read(//proc/**),Read(//sys/**),Read(/${W}/.git/config),Read(**/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
+        # No shell expansion, redirection, pipes or chaining: an allowed command
+        # could otherwise echo secrets from the environment or overwrite files.
+        DENY+=',Bash(*$*),Bash(*`*),Bash(*>*),Bash(*<*),Bash(*|*),Bash(*;*),Bash(*&*)'
+        # gh's --jq/--template evaluate expressions that can read the process
+        # environment (jq `env`), bypassing the $ denial.
+        DENY+=',Bash(gh *--jq*),Bash(gh * -q*),Bash(gh *--template*),Bash(gh * -t*)'
         echo "CLAUDE_ALLOWED_TOOLS=${ALLOW}" >> "$GITHUB_ENV"
-        # No shell expansion at all: an allowed command could otherwise echo
-        # secrets from the environment ($VAR, ${VAR}, `cmd`).
-        DENY+=',Bash(*$*),Bash(*`*)'
         echo "CLAUDE_DISALLOWED_TOOLS=${DENY}" >> "$GITHUB_ENV"
         # Reads are fenced to the working directories (workspace + --add-dir):
         # scratch, the plugin cache (reviewers read claudius sources) and the
@@ -408,7 +418,12 @@ runs:
         mkdir -p "$HOME/.claude/plugins/cache" "$HOME/.claude/projects"
         SETTINGS="$HOME/.claude/settings.json"
         [ -s "$SETTINGS" ] || echo '{}' > "$SETTINGS"
-        jq '.permissions.blockReadsOutsideWorkingDirectories = true' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+        # Fail closed: without this setting reads are not fenced.
+        if ! jq '.permissions.blockReadsOutsideWorkingDirectories = true' "$SETTINGS" > "$SETTINGS.tmp"; then
+          echo "::error::Could not patch $SETTINGS (invalid JSON or jq missing) — read fencing not applied."
+          exit 1
+        fi
+        mv "$SETTINGS.tmp" "$SETTINGS"
         echo "::group::Tool permissions"; echo "allow: ${ALLOW}"; echo "deny: ${DENY}"; echo "::endgroup::"
       env:
         ALLOWED_TOOLS_IN: ${{ inputs.allowed_tools }}
@@ -495,11 +510,9 @@ runs:
       shell: bash
       run: |
         # The review flow needs claudius >= 8.2.0 (post_pr_review.py, finalize,
-        # anchored script paths). The plugin is installed inside
-        # claude-code-action, so this is the earliest point it can be checked.
-        # Runs after the review: the plugin is installed inside claude-code-action,
-        # so no earlier check is possible. With several cached installs, the
-        # newest one is checked.
+        # anchored script paths). Runs after the review — the plugin is installed
+        # inside claude-code-action, so no earlier check is possible. With several
+        # cached installs, the newest one is checked.
         V=$(cat "$HOME"/.claude/plugins/cache/*/claudius/*/.claude-plugin/plugin.json 2>/dev/null \
           | grep -o '"version": *"[^"]*"' | grep -o '[0-9][0-9.]*' | sort -V | tail -n1 || true)
         echo "claudius plugin version: ${V:-unknown}"
