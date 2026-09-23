@@ -228,7 +228,7 @@ runs:
           if [ "$INIT" = "200" ]; then
             echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
           else
-            echo "::warning::MemCan server not usable (health ${HEALTH:-000}, MCP initialize ${INIT:-000}; 000 = unreachable/timeout, 401/403 = key rejected or IP blocked). Continuing without MemCan."
+            echo "::warning::MemCan server not usable (health ${HEALTH:-000}, MCP initialize ${INIT:-000}; 000 = unreachable/timeout, 401/403 = key rejected, IP blocked or Host header not in the server's allowed hosts). Continuing without MemCan."
             echo "MEMCAN_AVAILABLE=false" >> "$GITHUB_ENV"
           fi
         else
