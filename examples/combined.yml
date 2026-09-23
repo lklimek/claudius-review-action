@@ -24,7 +24,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v1
+      - uses: lklimek/claudius-review-action@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           memcan_url: ${{ secrets.MEMCAN_URL }}
@@ -42,7 +42,7 @@ jobs:
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
-      - uses: lklimek/claudius-review-action/learn@v1
+      - uses: lklimek/claudius-review-action/learn@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           memcan_url: ${{ secrets.MEMCAN_URL }}

@@ -87,7 +87,7 @@ inputs:
     required: false
     default: "false"
   checkout:
-    description: "Whether action handles git checkout"
+    description: "Whether action handles git checkout. If false, check out the PR head with enough history to reach origin/<base branch> (e.g. fetch-depth: 0) yourself."
     required: false
     default: "true"
   fetch_depth:
@@ -406,6 +406,7 @@ runs:
         if-no-files-found: ignore
 
     - name: Collect Claude Code transcripts
+      id: transcripts
       if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}
       # A transcript failure must not skip posting the report link / cleanup;
       # plaintext is still never uploaded (the output dir stays empty).
@@ -547,3 +548,12 @@ runs:
           || echo "::warning::Failed to remove the pending review request for '${{ inputs.reviewer_login }}'. It will stay on the PR, which will re-trigger a full review on the next push — check that the token has pull-requests write access."
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Fail on transcript upload error
+      # Runs last so a transcript failure never skips the report link or cleanup
+      # above, but still turns the job red instead of hiding in a green run.
+      if: ${{ !cancelled() && steps.transcripts.outcome == 'failure' }}
+      shell: bash
+      run: |
+        echo "::error::Collecting/encrypting Claude Code transcripts failed — nothing was uploaded. See the 'Collect Claude Code transcripts' step."
+        exit 1

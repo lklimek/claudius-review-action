@@ -30,7 +30,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v1
+      - uses: lklimek/claudius-review-action@v2
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -66,7 +66,7 @@ jobs:
       CLAUDE_CODE_MAX_TURNS: "200"
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
-      - uses: lklimek/claudius-review-action@v1
+      - uses: lklimek/claudius-review-action@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: sonnet
@@ -119,7 +119,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v1
+      - uses: lklimek/claudius-review-action@v2
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           remove_label_on_success: false
@@ -190,8 +190,8 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 | `remove_label_on_success` | No | `true` | Whether to remove trigger label |
 | `reviewer_login` | No | `""` | GitHub login to clear from pending review requests on success (review-request trigger mode only). No-op when empty |
 | `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
-| `checkout` | No | `true` | Whether action handles git checkout |
-| `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true) |
+| `checkout` | No | `true` | Whether action handles git checkout (the PR head commit). If `false`, check out the PR head yourself with enough history to reach `origin/<base>` |
+| `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true). Reviewers diff against `origin/<base>`, so keep `0` or deep enough to reach the merge base |
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
@@ -260,7 +260,7 @@ permissions:
 
 ## Learn Action
 
-The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v1`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
+The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v2`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
 
 ### Quick Start
 
@@ -281,7 +281,7 @@ jobs:
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
-      - uses: lklimek/claudius-review-action/learn@v1
+      - uses: lklimek/claudius-review-action/learn@v2
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           memcan_url: ${{ secrets.MEMCAN_URL }}
