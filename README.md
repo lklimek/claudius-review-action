@@ -30,7 +30,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v2
+      - uses: lklimek/claudius-review-action@v3
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -66,7 +66,7 @@ jobs:
       CLAUDE_CODE_MAX_TURNS: "200"
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
-      - uses: lklimek/claudius-review-action@v2
+      - uses: lklimek/claudius-review-action@v3
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: sonnet
@@ -119,7 +119,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v2
+      - uses: lklimek/claudius-review-action@v3
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           remove_label_on_success: false
@@ -184,6 +184,14 @@ write tools are always denied, since PR content is untrusted.
 
 This repository reviews its own non-draft PRs with the PR's version of the
 action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).
+
+## Upgrading from v2
+
+v3 is a breaking release:
+
+- **claudius ≥ 8.2.0 is required** — the review is posted by its `post_pr_review.py`; the job fails with an older plugin.
+- **Narrower default `allowed_tools`** — a static allowlist of what the flow needs; custom review flows relying on other tools must pass their own list.
+- **Changed flow** — reviewers run in parallel, and the job fails when no review was posted for the head commit.
 
 ## Inputs
 
@@ -274,7 +282,7 @@ permissions:
 
 ## Learn Action
 
-The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v2`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
+The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v3`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
 
 ### Quick Start
 
@@ -295,7 +303,7 @@ jobs:
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
-      - uses: lklimek/claudius-review-action/learn@v2
+      - uses: lklimek/claudius-review-action/learn@v3
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           memcan_url: ${{ secrets.MEMCAN_URL }}
