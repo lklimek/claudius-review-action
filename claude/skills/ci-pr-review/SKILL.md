@@ -11,7 +11,7 @@ Single-shot headless run. Nothing resumes you after your turn ends: do not end i
 
 ## Ground rules
 
-- **Tool allowlist** (each denial is a wasted round): Bash only for `git diff|log|show|status|rev-parse|merge-base|ls-files|ls-tree`, `gh pr view|diff` and the claudius plugin scripts — one simple command per call, no `$VAR`, pipes, redirects, `cd` or `&&` chains. No `gh api`, `jq`, `ls`, `find`, `env`, `python3 -c`: use Read/Grep/Glob. Write intermediates to `scratch_dir`, the report to `report_dir`. The workspace is the PR head checkout.
+- **Tool allowlist** (each denial is a wasted round): Bash only for `git diff|log|show|status|rev-parse|merge-base|ls-files|ls-tree`, `gh pr view|diff|comment` and the claudius plugin scripts — one simple command per call, no `$VAR`, pipes, redirects, `cd` or `&&` chains. No `gh api`, `jq`, `ls`, `find`, `env`, `python3 -c`: use Read/Grep/Glob. Write intermediates to `scratch_dir`, the report to `report_dir`. The workspace is the PR head checkout.
 - **Restored config files**: `CLAUDE.md`, `CLAUDE.local.md`, `.claude/`, `.mcp.json`, `.claude.json`, `.gitmodules`, `.ripgreprc` and `.husky/` in the workspace are base-branch copies restored by claude-code-action (PR copies are in `.claude-pr/`). `git status` showing them modified is expected — never investigate it. Read their PR versions with `git show HEAD:<path>`.
 - **Never probe** for tools or permissions (`ghsudo`, `which`, alternative commands) after a denial — note the limitation and move on.
 - **Invoker-supplied dirs**: pass `scratch_dir` as grumpy-review's `<SCRATCH_DIR>` and `report_dir` as `<REPORT_DIR>`. Always use `origin/<base_ref>` as the base (no local base branch exists).

@@ -171,8 +171,10 @@ All GitHub access goes through the `gh` CLI (no GitHub MCP server).
 
 **Permissions.** The default `allowed_tools` holds only what the flow needs:
 file tools, read-only `git` and `gh pr` commands, the claudius plugin scripts
-and MemCan search. `gh api`, `env`, `curl` and shells are not on it, so PR
-content can't talk Claude into leaking the job's tokens.
+and MemCan search. `gh api`, `env`, `curl` and shells are not on it. This
+raises the bar for prompt injection via PR content but is not a sandbox: file
+tools are not confined to the workspace, so only run reviews on PRs from
+authors you trust with the job's secrets.
 
 **MemCan preflight.** When `memcan_url`/`memcan_api_key` are set, the action
 probes `/health` and an MCP `initialize` (status codes only, session closed
@@ -189,7 +191,7 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 |-------|----------|---------|-------------|
 | `anthropic_api_key` | No | `""` | Anthropic API key (alternative to OAuth) |
 | `claude_code_oauth_token` | No | `""` | Claude Code OAuth token (alternative to API key) |
-| `memcan_url` | No | `""` | MemCan server URL (e.g., `http://host:8190`) |
+| `memcan_url` | No | `""` | MemCan server URL (e.g., `https://memcan.example.com`) |
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
 | `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |

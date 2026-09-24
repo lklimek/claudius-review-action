@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ""
   memcan_url:
-    description: "MemCan server URL (e.g., http://host:8190)"
+    description: "MemCan server URL (e.g., https://memcan.example.com)"
     required: false
     default: ""
   memcan_api_key:
@@ -98,10 +98,10 @@ inputs:
     description: >-
       Tool allowlist for Claude: what the review flow needs (file tools,
       read-only git and `gh pr` commands, the claudius plugin scripts, MemCan
-      search). Deliberately no `gh api`, `env`, `curl` or shells, so PR content
-      can't talk Claude into leaking the job's tokens.
+      search). No `gh api`, `env`, `curl` or shells — this narrows, but does
+      not eliminate, what prompt injection in PR content can reach.
     required: false
-    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet,Bash(git status),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git status *),Bash(git rev-parse *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(gh pr view *),Bash(gh pr diff *),Bash(*gh-list-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*lint_ephemeral_ids.py *),Bash(*merge_findings_helper.py *),Bash(*post_pr_review.py *),mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__search_code,mcp__plugin_memcan_brain__search_standards"
+    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet,Bash(git status),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git status *),Bash(git rev-parse *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(gh pr view *),Bash(gh pr diff *),Bash(gh pr comment *),Bash(*gh-list-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*lint_ephemeral_ids.py *),Bash(*merge_findings_helper.py *),Bash(*post_pr_review.py *),mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__search_code,mcp__plugin_memcan_brain__search_standards"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -435,28 +435,10 @@ runs:
         path: |
           ${{ github.workspace }}/review-report/report.json
           ${{ github.workspace }}/review-report/report.html
+          ${{ github.workspace }}/review-report/comments.json
+          ${{ github.workspace }}/review-report/body.md
         retention-days: ${{ inputs.report_retention_days }}
         if-no-files-found: ignore
-
-    - name: Check claudius plugin version
-      if: ${{ !cancelled() && steps.claude.outcome != 'failure' }}
-      shell: bash
-      run: |
-        # The review flow needs claudius >= 8.2.0 (post_pr_review.py, finalize,
-        # anchored script paths). Runs after the review — the plugin is installed
-        # inside claude-code-action, so no earlier check is possible. With several
-        # cached installs, the newest one is checked.
-        V=$(cat "$HOME"/.claude/plugins/cache/*/claudius/*/.claude-plugin/plugin.json 2>/dev/null \
-          | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '[0-9][0-9.]*' | sort -V | tail -n1 || true)
-        echo "claudius plugin version: ${V:-unknown}"
-        if [ -z "$V" ]; then
-          echo "::error::No claudius plugin found in the plugin cache — check the plugins/plugin_marketplaces inputs."
-          exit 1
-        fi
-        if [ "$(printf '%s\n' 8.2.0 "$V" | sort -V | head -n1)" != "8.2.0" ]; then
-          echo "::error::claudius ${V} is installed, but this action requires claudius >= 8.2.0 — check the plugins/plugin_marketplaces inputs."
-          exit 1
-        fi
 
     - name: Collect Claude Code transcripts
       id: transcripts
@@ -618,6 +600,28 @@ runs:
           || echo "::warning::Failed to remove the pending review request for '${{ inputs.reviewer_login }}'. It will stay on the PR, which will re-trigger a full review on the next push — check that the token has pull-requests write access."
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Check claudius plugin version
+      if: '!cancelled()'
+      shell: bash
+      run: |
+        # The review flow needs claudius >= 8.2.0 (post_pr_review.py, finalize,
+        # anchored script paths). Runs after the review — the plugin is installed
+        # inside claude-code-action, so no earlier check is possible. Runs last so
+        # a failure never skips the report link or cleanup; also runs when the
+        # review step failed, since a stale plugin is a likely cause. With several
+        # cached installs, the newest one is checked.
+        V=$(cat "$HOME"/.claude/plugins/cache/*/claudius/*/.claude-plugin/plugin.json 2>/dev/null \
+          | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '[0-9][0-9.]*' | sort -V | tail -n1 || true)
+        echo "claudius plugin version: ${V:-unknown}"
+        if [ -z "$V" ]; then
+          echo "::error::No claudius plugin found in the plugin cache — check the plugins/plugin_marketplaces inputs."
+          exit 1
+        fi
+        if [ "$(printf '%s\n' 8.2.0 "$V" | sort -V | head -n1)" != "8.2.0" ]; then
+          echo "::error::claudius ${V} is installed, but this action requires claudius >= 8.2.0 — check the plugins/plugin_marketplaces inputs."
+          exit 1
+        fi
 
     - name: Fail on transcript upload error
       # Runs last so a transcript failure never skips the report link or cleanup
