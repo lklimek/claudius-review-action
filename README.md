@@ -172,15 +172,20 @@ All GitHub access goes through the `gh` CLI (no GitHub MCP server).
 **Permissions.** Claude runs with a least-privilege allowlist computed per
 run: read-only `git`/`gh pr` commands, the claudius plugin scripts anchored to
 their install path, and file writes only inside the scratch and report
-directories. `gh api`, `jq`, shell interpreters, `/../` paths, git options
-that write or execute (`--output`, `--ext-diff`, `-c`, …) and credential files
-are denied. The job log shows the effective lists under "Tool permissions".
+directories; reads are fenced to the workspace, scratch dir, plugin cache and
+the session directory. The allowlist is the real control: `gh api`, `jq` and
+shell interpreters are simply not on it. The deny rules (`/../` paths, git
+options that write or execute, shell operators, credential files) are defence
+in depth — Claude Code checks each part of a compound command separately. The
+claudius scripts write where their arguments point and guard their own paths.
+The job log shows the effective lists under "Tool permissions".
 
 **MemCan preflight.** When `memcan_url`/`memcan_api_key` are set, the action
 probes `/health` and an MCP `initialize` (status codes only, session closed
 afterwards) and continues without MemCan if the server isn't usable. It warns
-when the URL is plain HTTP to a non-local host. MemCan is read-only in CI
-(search tools only; reviews never write memories).
+when the URL is plain HTTP to a non-local host. MemCan is search-only in CI,
+even with a custom `allowed_tools` (write tools are always denied; PR content
+is untrusted).
 
 This repository reviews its own non-draft PRs with the PR's version of the
 action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).
@@ -206,7 +211,7 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 | `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
 | `checkout` | No | `true` | Whether action handles git checkout (the PR head commit). If `false`, check out the PR head yourself with enough history to reach `origin/<base>` |
 | `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true). Reviewers diff against `origin/<base>`, so keep `0` or deep enough to reach the merge base |
-| `allowed_tools` | No | `""` | Tool allowlist for Claude. Empty = the computed least-privilege list (recommended); a value replaces it entirely |
+| `allowed_tools` | No | `""` | Tool allowlist for Claude. Empty = the computed least-privilege list (recommended; printed in the job log's "Tool permissions" group); a value replaces it entirely and must be a single line without double quotes. Deny rules always apply |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
 | `upload_transcripts` | No | `false` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as a GPG-encrypted artifact. Requires `transcripts_recipients` — the action fails instead of uploading plaintext |

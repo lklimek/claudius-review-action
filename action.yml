@@ -370,6 +370,12 @@ runs:
         # and marketplace segments are wildcards (the plugin is installed later,
         # inside claude-code-action), and any "/../" is denied so the wildcards
         # can't be used to traverse elsewhere. Edit rules also govern Write.
+        # The allowlist is the real control; Claude Code checks each part of a
+        # compound command on its own (a pipe into `head` passes), so the Bash
+        # denies below are defence in depth. Allowlisted claudius scripts write
+        # where their arguments say (e.g. finalize --output) and guard their
+        # own paths — the Edit fence does not cover them.
+        echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
         S="${{ runner.temp }}/claudius-review"
         R="${{ github.workspace }}/review-report"
         W="${{ github.workspace }}"
@@ -385,7 +391,7 @@ runs:
           for c in "git diff" "git log" "git show" "git status" "git rev-parse" "git merge-base" "git ls-files" "git ls-tree" "gh pr view" "gh pr diff"; do
             ALLOW+=",Bash(${c} *)"
           done
-          for f in consolidate_reports validate_report generate_review_report lint_ephemeral_ids merge_findings_helper post_pr_review; do
+          for f in consolidate_reports validate_report lint_ephemeral_ids merge_findings_helper post_pr_review; do
             ALLOW+=",Bash(python3 ${P}/${f}.py *)"
           done
           for f in gh-list-review-threads gh-fetch-review-comments gh-fetch-reviews gh-resolve-review-threads gh-post-review-reply gh-pr-base-sha; do
@@ -396,12 +402,16 @@ runs:
           fi
         fi
         DENY="SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
+        # MemCan stays search-only even with a custom allowed_tools: PR content is
+        # untrusted, so memories are written post-merge (learn/), never here.
+        DENY+=",mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory"
         # git diff enters no-index mode on its own when a path lies outside the repo,
         # so git may never see absolute, home-relative or parent-relative paths.
-        DENY+=",Bash(*/../*),Bash(git * /*),Bash(git * ~*),Bash(git *../*),Bash(git -c *),Bash(git -C *),Bash(git *--no-index*),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
+        TAB=$'\t'  # a tab separates arguments just like a space
+        DENY+=",Bash(*/../*),Bash(git * /*),Bash(git * ~*),Bash(git *${TAB}/*),Bash(git *${TAB}~*),Bash(git *../*),Bash(git -c *),Bash(git -C *),Bash(git *--no-index*),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
         # "//" = absolute path in permission rules. Plugin-cache clones carry
         # their own .git/config.
-        DENY+=",Read(//proc/**),Read(//sys/**),Read(/${W}/.git/config),Read(**/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
+        DENY+=",Read(//proc/**),Read(//sys/**),Read(//**/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
         # No shell expansion, redirection, pipes or chaining: an allowed command
         # could otherwise echo secrets from the environment or overwrite files.
         DENY+=',Bash(*$*),Bash(*`*),Bash(*>*),Bash(*<*),Bash(*|*),Bash(*;*),Bash(*&*)'
@@ -414,8 +424,11 @@ runs:
         # scratch, the plugin cache (reviewers read claudius sources) and the
         # session projects dir (Claude re-reads oversized tool results there).
         echo "CLAUDE_PLUGIN_CACHE=$HOME/.claude/plugins/cache" >> "$GITHUB_ENV"
-        echo "CLAUDE_PROJECTS_DIR=$HOME/.claude/projects" >> "$GITHUB_ENV"
-        mkdir -p "$HOME/.claude/plugins/cache" "$HOME/.claude/projects"
+        # Only this session's project dir: the whole tree would expose other
+        # sessions' transcripts. Slug = workspace path, non-alphanumerics -> "-".
+        PROJ="$HOME/.claude/projects/$(printf '%s' "$W" | sed 's/[^A-Za-z0-9]/-/g')"
+        echo "CLAUDE_PROJECTS_DIR=${PROJ}" >> "$GITHUB_ENV"
+        mkdir -p "$HOME/.claude/plugins/cache" "$PROJ"
         SETTINGS="$HOME/.claude/settings.json"
         [ -s "$SETTINGS" ] || echo '{}' > "$SETTINGS"
         # Fail closed: without this setting reads are not fenced.
@@ -506,7 +519,7 @@ runs:
         if-no-files-found: ignore
 
     - name: Check claudius plugin version
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && steps.claude.outcome != 'failure' }}
       shell: bash
       run: |
         # The review flow needs claudius >= 8.2.0 (post_pr_review.py, finalize,
@@ -514,10 +527,14 @@ runs:
         # inside claude-code-action, so no earlier check is possible. With several
         # cached installs, the newest one is checked.
         V=$(cat "$HOME"/.claude/plugins/cache/*/claudius/*/.claude-plugin/plugin.json 2>/dev/null \
-          | grep -o '"version": *"[^"]*"' | grep -o '[0-9][0-9.]*' | sort -V | tail -n1 || true)
+          | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '[0-9][0-9.]*' | sort -V | tail -n1 || true)
         echo "claudius plugin version: ${V:-unknown}"
-        if [ -z "$V" ] || [ "$(printf '%s\n' 8.2.0 "$V" | sort -V | head -n1)" != "8.2.0" ]; then
-          echo "::error::claudius ${V:-(not found)} is installed, but this action requires claudius >= 8.2.0 — check the plugins/plugin_marketplaces inputs."
+        if [ -z "$V" ]; then
+          echo "::error::No claudius plugin found in the plugin cache — check the plugins/plugin_marketplaces inputs."
+          exit 1
+        fi
+        if [ "$(printf '%s\n' 8.2.0 "$V" | sort -V | head -n1)" != "8.2.0" ]; then
+          echo "::error::claudius ${V} is installed, but this action requires claudius >= 8.2.0 — check the plugins/plugin_marketplaces inputs."
           exit 1
         fi
 
@@ -609,6 +626,18 @@ runs:
             "'${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
           exit 1
         fi
+        # A report alone is not enough: post_pr_review.py must have posted a
+        # review on this head commit during this run.
+        POSTED=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\") | .id" | tail -n1)
+        if [ -z "$POSTED" ]; then
+          echo "::error::report.json exists but no review was posted on ${HEAD_SHA} during this run —" \
+            "post_pr_review.py failed or was never called. The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
+          exit 1
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
     - name: Append report link to last Claude review
       if: steps.upload-report.outputs.artifact-url != ''

@@ -17,6 +17,7 @@ claude/
   agents/               # Coordinator agent (installed into ~/.claude/agents; __MODEL__ templated)
 .github/workflows/
   claudius-review.yml   # Self-review of every non-draft PR using `uses: ./`
+  validate.yml          # action.yml schema check + actionlint on workflows/examples
 learn/
   action.yml            # Post-merge learning extraction (WIP — do not touch without asking)
   shared/
