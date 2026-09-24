@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ""
   memcan_url:
-    description: "MemCan server URL (e.g., http://host:8190)"
+    description: "MemCan server URL (e.g., https://memcan.example.com)"
     required: false
     default: ""
   memcan_api_key:
@@ -95,9 +95,13 @@ inputs:
     required: false
     default: "0"
   allowed_tools:
-    description: "Tool allowlist for Claude"
+    description: >-
+      Tool allowlist for Claude: what the review flow needs (file tools,
+      read-only git and `gh pr` commands, the claudius plugin scripts, MemCan
+      search). No `gh api`, `env`, `curl` or shells — this narrows, but does
+      not eliminate, what prompt injection in PR content can reach.
     required: false
-    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,Task,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,Bash(gh pr *),Bash(gh api *),Bash(git diff *),Bash(git log *),Bash(git fetch *),Bash(git branch *),Bash(git rev-parse *),Bash(git show *),Bash(git status),Bash(git status *),Bash(git remote *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(echo *),Bash(ls *),Bash(jq *),Bash(mkdir *),Bash(pwd *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-list-review-threads.sh *),Bash(*gh-request-reviewer.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*generate_review_report.py *),Bash(*merge_findings_helper.py *),Bash(*lint_ephemeral_ids.py *),mcp__plugin_memcan_brain,mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory,mcp__plugin_memcan_brain__count_memories"
+    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet,Bash(git status),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git status *),Bash(git rev-parse *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(gh pr view *),Bash(gh pr diff *),Bash(gh pr comment *),Bash(*gh-list-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*lint_ephemeral_ids.py *),Bash(*merge_findings_helper.py *),Bash(*post_pr_review.py *),mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__search_code,mcp__plugin_memcan_brain__search_standards"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -214,7 +218,37 @@ runs:
       shell: bash
       run: |
         if [ -n "$MEMCAN_URL_IN" ] && [ -n "$MEMCAN_API_KEY_IN" ]; then
-          echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
+          # Probe the server the plugin's HTTP MCP config will use, so an
+          # unreachable server or a rejected key shows up here (status codes
+          # only) instead of as a silent "failed to connect" inside Claude.
+          URL="${MEMCAN_URL_IN%/}"
+          HEALTH=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL/health" || true)
+          # Anchored: "http://localhost.attacker.example" must not count as local.
+          URL_LC="${URL,,}"
+          if [[ "$URL_LC" =~ ^http:// ]] && ! [[ "$URL_LC" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$ ]]; then
+            echo "::warning::memcan_url uses plain HTTP to a non-local host — the MemCan API key travels unencrypted. Put the server behind HTTPS."
+          fi
+          # The key goes in via -H @file (printf is a builtin), never curl's argv.
+          # Headers go to stdout (-D -), body is discarded; last line = status code.
+          RESP=$(curl -s -o /dev/null -D - -w '\n%{http_code}' --max-time 15 -X POST "$URL/mcp" \
+            -H @<(printf 'Authorization: Bearer %s\n' "$MEMCAN_API_KEY_IN") \
+            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claudius-review-action-preflight","version":"1"}}}' \
+            || true)
+          INIT=$(printf '%s' "$RESP" | tail -n1)
+          SID=$(printf '%s' "$RESP" | grep -i '^mcp-session-id:' | head -n1 | cut -d: -f2- | tr -d ' \r' || true)
+          if [ -n "$SID" ]; then
+            # Close the probe's session instead of leaving it to expire server-side.
+            curl -s -o /dev/null --max-time 10 -X DELETE "$URL/mcp" \
+              -H @<(printf 'Authorization: Bearer %s\n' "$MEMCAN_API_KEY_IN") -H "Mcp-Session-Id: ${SID}" || true
+          fi
+          echo "MemCan preflight: GET /health -> ${HEALTH:-000}, POST /mcp initialize -> ${INIT:-000}"
+          if [ "$INIT" = "200" ]; then
+            echo "MEMCAN_AVAILABLE=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::MemCan server not usable (health ${HEALTH:-000}, MCP initialize ${INIT:-000}; 000 = unreachable/timeout, 401/403 = key rejected, IP blocked or Host header not in the server's allowed hosts). Continuing without MemCan."
+            echo "MEMCAN_AVAILABLE=false" >> "$GITHUB_ENV"
+          fi
         else
           echo "::warning::MemCan URL or API key not provided. MemCan features will be unavailable."
           echo "MEMCAN_AVAILABLE=false" >> "$GITHUB_ENV"
@@ -295,38 +329,38 @@ runs:
       run: |
         # User-level (~/.claude) skills/agents are loaded by claude-code-action
         # (settingSources includes "user"), and stay out of the reviewed repo.
-        MODEL="${INPUT_MODEL:-inherit}"
-        if ! [[ "$MODEL" =~ ^[A-Za-z0-9._@:-]+(\[[A-Za-z0-9]+\])?$ ]]; then
+        MODEL="${INPUT_MODEL}"
+        if [ -n "$MODEL" ] && ! [[ "$MODEL" =~ ^[A-Za-z0-9._@:-]+(\[[A-Za-z0-9]+\])?$ ]]; then
           echo "::error::Invalid model input: '${MODEL}'"
           exit 1
         fi
         mkdir -p "$HOME/.claude/skills" "$HOME/.claude/agents"
         cp -r "${GITHUB_ACTION_PATH}/claude/skills/." "$HOME/.claude/skills/"
         for f in "${GITHUB_ACTION_PATH}"/claude/agents/*.md; do
-          sed "s|__MODEL__|${MODEL}|" "$f" > "$HOME/.claude/agents/$(basename "$f")"
+          # Empty model: drop the line so the main thread uses Claude Code's
+          # default ("inherit" has no parent session to inherit from here).
+          if [ -n "$MODEL" ]; then
+            sed "s|__MODEL__|${MODEL}|" "$f"
+          else
+            sed "/^model: __MODEL__$/d" "$f"
+          fi > "$HOME/.claude/agents/$(basename "$f")"
         done
       env:
         INPUT_MODEL: ${{ inputs.model }}
 
-    - name: Pre-compute PR diff and hunk ranges
+    - name: Pre-compute PR diff
       shell: bash
       run: |
-        # Reviewers read pr.diff instead of re-running per-file git diff, and
-        # the coordinator validates inline-comment lines against diff-ranges.txt
-        # (new-side "<path> <start>-<end>" per hunk) instead of re-reading diffs.
+        # Consumed by "Verify review report was produced" (review posted this run).
+        echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+        # Reviewers read pr.diff once instead of re-running per-file git diff.
         S="${{ runner.temp }}/claudius-review"
         if ! git diff "origin/${BASE_REF}...HEAD" > "$S/pr.diff" 2>/dev/null; then
-          rm -f "$S/pr.diff" "$S/diff-ranges.txt"
+          rm -f "$S/pr.diff"
           echo "::warning::Could not diff against origin/${BASE_REF} (base not fetched?) — reviewers fall back to git diff."
           exit 0
         fi
-        awk '
-          /^\+\+\+ / { path = substr($0, 7); next }
-          /^@@ / {
-            split($3, a, ","); start = substr(a[1], 2); len = (a[2] == "" ? 1 : a[2])
-            if (len > 0 && path != "/dev/null") print path, start "-" (start + len - 1)
-          }' "$S/pr.diff" > "$S/diff-ranges.txt"
-        echo "pr.diff: $(wc -l < "$S/pr.diff") lines, $(wc -l < "$S/diff-ranges.txt") hunks"
+        echo "pr.diff: $(wc -l < "$S/pr.diff") lines"
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
 
@@ -386,7 +420,7 @@ runs:
           ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           --add-dir ${{ runner.temp }}/claudius-review
           --allowedTools "${{ inputs.allowed_tools }}"
-          --disallowedTools "SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
+          --disallowedTools "SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory"
           ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}
@@ -402,6 +436,8 @@ runs:
         path: |
           ${{ github.workspace }}/review-report/report.json
           ${{ github.workspace }}/review-report/report.html
+          ${{ github.workspace }}/review-report/comments.json
+          ${{ github.workspace }}/review-report/body.md
         retention-days: ${{ inputs.report_retention_days }}
         if-no-files-found: ignore
 
@@ -493,18 +529,33 @@ runs:
             "'${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
           exit 1
         fi
+        # A report alone is not enough: post_pr_review.py must have posted a
+        # review on this head commit during this run (not one by the PR author).
+        POSTED=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tail -n1)
+        if [ -z "$POSTED" ]; then
+          echo "::error::report.json exists but no review was posted on ${HEAD_SHA} during this run —" \
+            "post_pr_review.py failed or was never called. The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
+          exit 1
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
 
     - name: Append report link to last Claude review
-      if: steps.upload-report.outputs.artifact-url != ''
+      # !cancelled(): the link matters most when the verify step above failed.
+      if: ${{ !cancelled() && steps.upload-report.outputs.artifact-url != '' }}
       shell: bash
       run: |
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Find the last review posted by the review bot (claude[bot] when using
-        # the Claude GitHub App token, github-actions[bot] with GITHUB_TOKEN).
+        # Find the last review the review bot posted on this head commit
+        # (claude[bot] with the Claude GitHub App token, github-actions[bot] with
+        # GITHUB_TOKEN); none → fall back to a PR comment, never an older review.
         REVIEW_ID=$(gh api --paginate "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-          --jq '.[] | select(.user.login == "claude[bot]" or .user.login == "github-actions[bot]") | .id' | tail -n1)
+          --jq ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"github-actions[bot]\") and .commit_id == \"${HEAD_SHA}\") | .id" | tail -n1)
         BODY=""
         if [ -n "$REVIEW_ID" ]; then
           BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
@@ -525,6 +576,7 @@ runs:
         fi
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
     - name: Remove trigger label
       if: inputs.remove_label_on_success == 'true' && success()
@@ -553,6 +605,28 @@ runs:
           || echo "::warning::Failed to remove the pending review request for '${{ inputs.reviewer_login }}'. It will stay on the PR, which will re-trigger a full review on the next push — check that the token has pull-requests write access."
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Check claudius plugin version
+      if: '!cancelled()'
+      shell: bash
+      run: |
+        # The review flow needs claudius >= 8.2.0 (post_pr_review.py, finalize,
+        # anchored script paths). Runs after the review — the plugin is installed
+        # inside claude-code-action, so no earlier check is possible. Runs last so
+        # a failure never skips the report link or cleanup; also runs when the
+        # review step failed, since a stale plugin is a likely cause. With several
+        # cached installs, the newest one is checked.
+        V=$(cat "$HOME"/.claude/plugins/cache/*/claudius/*/.claude-plugin/plugin.json 2>/dev/null \
+          | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | grep -o '[0-9][0-9.]*' | sort -V | tail -n1 || true)
+        echo "claudius plugin version: ${V:-unknown}"
+        if [ -z "$V" ]; then
+          echo "::error::No claudius plugin found in the plugin cache — check the plugins/plugin_marketplaces inputs."
+          exit 1
+        fi
+        if [ "$(printf '%s\n' 8.2.0 "$V" | sort -V | head -n1)" != "8.2.0" ]; then
+          echo "::error::claudius ${V} is installed, but this action requires claudius >= 8.2.0 — check the plugins/plugin_marketplaces inputs."
+          exit 1
+        fi
 
     - name: Fail on transcript upload error
       # Runs last so a transcript failure never skips the report link or cleanup
