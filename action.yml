@@ -228,9 +228,10 @@ runs:
           if [[ "$URL_LC" =~ ^http:// ]] && ! [[ "$URL_LC" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$ ]]; then
             echo "::warning::memcan_url uses plain HTTP to a non-local host — the MemCan API key travels unencrypted. Put the server behind HTTPS."
           fi
+          # The key goes in via -H @file (printf is a builtin), never curl's argv.
           # Headers go to stdout (-D -), body is discarded; last line = status code.
           RESP=$(curl -s -o /dev/null -D - -w '\n%{http_code}' --max-time 15 -X POST "$URL/mcp" \
-            -H "Authorization: Bearer ${MEMCAN_API_KEY_IN}" \
+            -H @<(printf 'Authorization: Bearer %s\n' "$MEMCAN_API_KEY_IN") \
             -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
             -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claudius-review-action-preflight","version":"1"}}}' \
             || true)
@@ -239,7 +240,7 @@ runs:
           if [ -n "$SID" ]; then
             # Close the probe's session instead of leaving it to expire server-side.
             curl -s -o /dev/null --max-time 10 -X DELETE "$URL/mcp" \
-              -H "Authorization: Bearer ${MEMCAN_API_KEY_IN}" -H "Mcp-Session-Id: ${SID}" || true
+              -H @<(printf 'Authorization: Bearer %s\n' "$MEMCAN_API_KEY_IN") -H "Mcp-Session-Id: ${SID}" || true
           fi
           echo "MemCan preflight: GET /health -> ${HEALTH:-000}, POST /mcp initialize -> ${INIT:-000}"
           if [ "$INIT" = "200" ]; then
@@ -529,9 +530,9 @@ runs:
           exit 1
         fi
         # A report alone is not enough: post_pr_review.py must have posted a
-        # review on this head commit during this run.
+        # review on this head commit during this run (not one by the PR author).
         POSTED=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\") | .id" | tail -n1)
+          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tail -n1)
         if [ -z "$POSTED" ]; then
           echo "::error::report.json exists but no review was posted on ${HEAD_SHA} during this run —" \
             "post_pr_review.py failed or was never called. The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
@@ -540,18 +541,21 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
 
     - name: Append report link to last Claude review
-      if: steps.upload-report.outputs.artifact-url != ''
+      # !cancelled(): the link matters most when the verify step above failed.
+      if: ${{ !cancelled() && steps.upload-report.outputs.artifact-url != '' }}
       shell: bash
       run: |
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Find the last review posted by the review bot (claude[bot] when using
-        # the Claude GitHub App token, github-actions[bot] with GITHUB_TOKEN).
+        # Find the last review the review bot posted on this head commit
+        # (claude[bot] with the Claude GitHub App token, github-actions[bot] with
+        # GITHUB_TOKEN); none → fall back to a PR comment, never an older review.
         REVIEW_ID=$(gh api --paginate "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-          --jq '.[] | select(.user.login == "claude[bot]" or .user.login == "github-actions[bot]") | .id' | tail -n1)
+          --jq ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"github-actions[bot]\") and .commit_id == \"${HEAD_SHA}\") | .id" | tail -n1)
         BODY=""
         if [ -n "$REVIEW_ID" ]; then
           BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
@@ -572,6 +576,7 @@ runs:
         fi
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
     - name: Remove trigger label
       if: inputs.remove_label_on_success == 'true' && success()
