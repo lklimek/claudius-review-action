@@ -96,13 +96,12 @@ inputs:
     default: "0"
   allowed_tools:
     description: >-
-      Tool allowlist for Claude. Empty (default) = a least-privilege list
-      computed at runtime: read-only git/gh commands, the claudius plugin
-      scripts anchored to their install path, and file writes limited to the
-      scratch and report directories. Requires claudius >= 8.2.0. Setting
-      this replaces the computed list entirely.
+      Tool allowlist for Claude: what the review flow needs (file tools,
+      read-only git and `gh pr` commands, the claudius plugin scripts, MemCan
+      search). Deliberately no `gh api`, `env`, `curl` or shells, so PR content
+      can't talk Claude into leaking the job's tokens.
     required: false
-    default: ""
+    default: "Read,Write,Edit,Glob,Grep,Agent,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet,Bash(git status),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(git status *),Bash(git rev-parse *),Bash(git merge-base *),Bash(git ls-files *),Bash(git ls-tree *),Bash(gh pr view *),Bash(gh pr diff *),Bash(*gh-list-review-threads.sh *),Bash(*gh-fetch-review-comments.sh *),Bash(*gh-fetch-reviews.sh *),Bash(*gh-resolve-review-threads.sh *),Bash(*gh-post-review-reply.sh *),Bash(*gh-pr-base-sha.sh *),Bash(*consolidate_reports.py *),Bash(*validate_report.py *),Bash(*lint_ephemeral_ids.py *),Bash(*merge_findings_helper.py *),Bash(*post_pr_review.py *),mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__search_code,mcp__plugin_memcan_brain__search_standards"
   claude_extra_args:
     description: "Additional Claude Code CLI flags (appended to built-in args)"
     required: false
@@ -351,6 +350,8 @@ runs:
     - name: Pre-compute PR diff
       shell: bash
       run: |
+        # Consumed by "Verify review report was produced" (review posted this run).
+        echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
         # Reviewers read pr.diff once instead of re-running per-file git diff.
         S="${{ runner.temp }}/claudius-review"
         if ! git diff "origin/${BASE_REF}...HEAD" > "$S/pr.diff" 2>/dev/null; then
@@ -361,85 +362,6 @@ runs:
         echo "pr.diff: $(wc -l < "$S/pr.diff") lines"
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
-
-    - name: Build tool permissions
-      shell: bash
-      run: |
-        # Least-privilege allow/deny lists. Bash rules match the literal command
-        # text, so plugin scripts are anchored to their install path; the version
-        # and marketplace segments are wildcards (the plugin is installed later,
-        # inside claude-code-action), and any "/../" is denied so the wildcards
-        # can't be used to traverse elsewhere. Edit rules also govern Write.
-        # The allowlist is the real control; Claude Code checks each part of a
-        # compound command on its own (a pipe into `head` passes), so the Bash
-        # denies below are defence in depth. Allowlisted claudius scripts write
-        # where their arguments say (e.g. finalize --output) and guard their
-        # own paths — the Edit fence does not cover them.
-        echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
-        S="${{ runner.temp }}/claudius-review"
-        R="${{ github.workspace }}/review-report"
-        W="${{ github.workspace }}"
-        P="$HOME/.claude/plugins/cache/*/claudius/*/scripts"
-        if [ -n "$ALLOWED_TOOLS_IN" ]; then
-          # One line only: a newline would inject extra variables into GITHUB_ENV.
-          case "$ALLOWED_TOOLS_IN" in
-            *$'\n'*|*$'\r'*|*'"'*) echo "::error::allowed_tools must be a single line without double quotes."; exit 1 ;;
-          esac
-          ALLOW="$ALLOWED_TOOLS_IN"
-        else
-          ALLOW="Read,Glob,Grep,Agent,Skill,TaskCreate,TaskUpdate,TaskList,TaskGet,Edit(/${S}/**),Edit(/${R}/**),Bash(git status)"
-          for c in "git diff" "git log" "git show" "git status" "git rev-parse" "git merge-base" "git ls-files" "git ls-tree" "gh pr view" "gh pr diff"; do
-            ALLOW+=",Bash(${c} *)"
-          done
-          for f in consolidate_reports validate_report lint_ephemeral_ids merge_findings_helper post_pr_review; do
-            ALLOW+=",Bash(python3 ${P}/${f}.py *)"
-          done
-          for f in gh-list-review-threads gh-fetch-review-comments gh-fetch-reviews gh-resolve-review-threads gh-post-review-reply gh-pr-base-sha; do
-            ALLOW+=",Bash(${P}/${f}.sh *)"
-          done
-          if [ "$MEMCAN_AVAILABLE" = "true" ]; then
-            ALLOW+=",mcp__plugin_memcan_brain__search,mcp__plugin_memcan_brain__search_memories,mcp__plugin_memcan_brain__search_code,mcp__plugin_memcan_brain__search_standards"
-          fi
-        fi
-        DENY="SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor"
-        # MemCan stays search-only even with a custom allowed_tools: PR content is
-        # untrusted, so memories are written post-merge (learn/), never here.
-        DENY+=",mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory"
-        # git diff enters no-index mode on its own when a path lies outside the repo,
-        # so git may never see absolute, home-relative or parent-relative paths.
-        TAB=$'\t'  # a tab separates arguments just like a space
-        DENY+=",Bash(*/../*),Bash(git * /*),Bash(git * ~*),Bash(git *${TAB}/*),Bash(git *${TAB}~*),Bash(git *../*),Bash(git -c *),Bash(git -C *),Bash(git *--no-index*),Bash(git *--output*),Bash(git *--ext-diff*),Bash(git *--textconv*),Bash(git *--upload-pack*),Bash(git *--exec*)"
-        # "//" = absolute path in permission rules. Plugin-cache clones carry
-        # their own .git/config.
-        DENY+=",Read(//proc/**),Read(//sys/**),Read(//**/.git/config),Read(~/.config/gh/**),Read(~/.claude/.credentials.json),Read(~/.claude.json)"
-        # No shell expansion, redirection, pipes or chaining: an allowed command
-        # could otherwise echo secrets from the environment or overwrite files.
-        DENY+=',Bash(*$*),Bash(*`*),Bash(*>*),Bash(*<*),Bash(*|*),Bash(*;*),Bash(*&*)'
-        # gh's --jq/--template evaluate expressions that can read the process
-        # environment (jq `env`), bypassing the $ denial.
-        DENY+=',Bash(gh *--jq*),Bash(gh * -q*),Bash(gh *--template*),Bash(gh * -t*)'
-        echo "CLAUDE_ALLOWED_TOOLS=${ALLOW}" >> "$GITHUB_ENV"
-        echo "CLAUDE_DISALLOWED_TOOLS=${DENY}" >> "$GITHUB_ENV"
-        # Reads are fenced to the working directories (workspace + --add-dir):
-        # scratch, the plugin cache (reviewers read claudius sources) and the
-        # session projects dir (Claude re-reads oversized tool results there).
-        echo "CLAUDE_PLUGIN_CACHE=$HOME/.claude/plugins/cache" >> "$GITHUB_ENV"
-        # Only this session's project dir: the whole tree would expose other
-        # sessions' transcripts. Slug = workspace path, non-alphanumerics -> "-".
-        PROJ="$HOME/.claude/projects/$(printf '%s' "$W" | sed 's/[^A-Za-z0-9]/-/g')"
-        echo "CLAUDE_PROJECTS_DIR=${PROJ}" >> "$GITHUB_ENV"
-        mkdir -p "$HOME/.claude/plugins/cache" "$PROJ"
-        SETTINGS="$HOME/.claude/settings.json"
-        [ -s "$SETTINGS" ] || echo '{}' > "$SETTINGS"
-        # Fail closed: without this setting reads are not fenced.
-        if ! jq '.permissions.blockReadsOutsideWorkingDirectories = true' "$SETTINGS" > "$SETTINGS.tmp"; then
-          echo "::error::Could not patch $SETTINGS (invalid JSON or jq missing) — read fencing not applied."
-          exit 1
-        fi
-        mv "$SETTINGS.tmp" "$SETTINGS"
-        echo "::group::Tool permissions"; echo "allow: ${ALLOW}"; echo "deny: ${DENY}"; echo "::endgroup::"
-      env:
-        ALLOWED_TOOLS_IN: ${{ inputs.allowed_tools }}
 
     - name: Count open review threads
       id: threads
@@ -496,10 +418,8 @@ runs:
           --agent ${{ inputs.claude_agent }}
           ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
           --add-dir ${{ runner.temp }}/claudius-review
-          --add-dir ${{ env.CLAUDE_PLUGIN_CACHE }}
-          --add-dir ${{ env.CLAUDE_PROJECTS_DIR }}
-          --allowedTools "${{ env.CLAUDE_ALLOWED_TOOLS }}"
-          --disallowedTools "${{ env.CLAUDE_DISALLOWED_TOOLS }}"
+          --allowedTools "${{ inputs.allowed_tools }}"
+          --disallowedTools "SendMessage,WebFetch,WebSearch,NotebookEdit,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,PushNotification,ScheduleWakeup,Workflow,Monitor,mcp__plugin_memcan_brain__add_memory,mcp__plugin_memcan_brain__update_memory,mcp__plugin_memcan_brain__delete_memory"
           ${{ inputs.claude_extra_args }}
       env:
         GH_TOKEN: ${{ inputs.github_token }}
