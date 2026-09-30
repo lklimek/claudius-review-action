@@ -23,7 +23,7 @@ inputs:
     required: false
     default: ""
   github_token:
-    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see docs/github-app.md) to post as <app>[bot]."
+    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see docs/github-app.md) to post as <app>[bot]. The default applies only when the input is omitted: an explicitly passed empty value leaves the action without a token, with no fallback to github.token (use `<expr> || github.token`)."
     required: false
     default: ${{ github.token }}
   allowed_non_write_users:
@@ -522,10 +522,20 @@ runs:
       if: '!cancelled()'
       shell: bash
       run: |
-        # Reviews on this head commit submitted during this run, not by the PR
-        # author — matches any github_token identity. Newest first.
-        IDS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tac | xargs)
+        # Claudius reviews on this head commit submitted during this run, not by
+        # the PR author, newest first. Claudius = post_pr_review.py's attribution
+        # footer (always in its body) from a trusted origin, so an outsider
+        # pasting the footer does not count (see lib/claudius.jq).
+        ROWS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+          | jq -s -r -L "${{ github.action_path }}/lib" \
+            --arg head "$HEAD_SHA" --arg since "$REVIEW_STARTED_AT" --arg author "$PR_AUTHOR" 'include "claudius";
+            add // [] | .[] | select(.commit_id == $head and .submitted_at >= $since and .user.login != $author
+              and ((.body // "") | contains(claudius_footer)) and trusted_origin)
+            | "\(.id) \(.user.login)"' | tac)
+        IDS=$(printf '%s\n' "$ROWS" | cut -d' ' -f1 | xargs)
+        if [ -n "$IDS" ]; then
+          echo "Claudius review posted as @$(printf '%s\n' "$ROWS" | head -n1 | cut -d' ' -f2)"
+        fi
         echo "ids=${IDS}" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ inputs.github_token }}
@@ -545,14 +555,15 @@ runs:
           exit 1
         fi
         # A report alone is not enough: post_pr_review.py must have posted a
-        # review on this head commit during this run (not one by the PR author).
+        # Claudius review on this head commit during this run.
         if [ "$LIST_OUTCOME" != "success" ]; then
           echo "::error::Could not list the PR's reviews to confirm one was posted (see 'List reviews posted this run')."
           exit 1
         fi
         if [ -z "$POSTED_IDS" ]; then
-          echo "::error::report.json exists but no review was posted on ${HEAD_SHA} during this run —" \
-            "post_pr_review.py failed or was never called. The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
+          echo "::error::report.json exists but no Claudius review was posted on ${HEAD_SHA} during this run —" \
+            "post_pr_review.py failed or was never called, or the posting identity is neither a bot nor a repo collaborator/org member" \
+            "(see docs/how-it-works.md, 'Posted-review detection'). The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
           exit 1
         fi
       env:
@@ -568,15 +579,11 @@ runs:
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Candidates (newest first) come from 'List reviews posted this run'. The
-        # filter can't tell whose review it is, so keep the first one this token
-        # can edit — a concurrent human review fails the PUT and is skipped.
-        # Reviews with an empty body are skipped too: GitHub rejects editing them
-        # (422 "Could not edit a review with a missing body"). Nothing edited →
-        # post a PR comment.
+        # Claudius reviews from 'List reviews posted this run', newest first; edit
+        # the first one this token can (one posted under another identity fails
+        # the PUT). Nothing edited → post a PR comment.
         for REVIEW_ID in $CANDIDATES; do
-          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty') || continue
-          [ -n "$BODY" ] || continue
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body') || continue
           CLEAN_BODY=$(printf '%s\n' "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
           UPDATED="${CLEAN_BODY}
         ${REPORT_LINE}"

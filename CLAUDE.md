@@ -12,6 +12,8 @@ Published at: `lklimek/claudius-review-action`
 
 ```
 action.yml              # Main composite action (PR review)
+lib/
+  claudius.jq           # Claudius footer + trusted-origin rule (review and learn)
 claude/
   skills/ci-pr-review/  # Review flow instructions (installed into ~/.claude/skills)
   agents/               # Coordinator agent (installed into ~/.claude/agents; __MODEL__ templated)
