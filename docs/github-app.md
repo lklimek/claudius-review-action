@@ -86,11 +86,14 @@ the App exists to replace.
 - **Token reachability in the review job.** The review job needs a checkout,
   and claude-code-action configures git with `github_token`, so a
   prompt-injected review agent could read the App token from the workspace.
-  It grants nothing beyond what the agent already exercises through its
-  allowed `gh pr` commands and claudius scripts (the App's narrow permissions,
-  no push), expires within the hour, and the agent has no network tools to
-  send it elsewhere. The learn job, which needs no checkout, refuses one
-  instead.
+  The agent has no web or network tools, but its allowed `gh pr comment` and
+  review-posting commands are a publish channel: a leaked token could be
+  posted on the PR and used by anyone until it expires (at most 1 hour, or
+  when the job ends and `create-github-app-token` revokes it), with the App's
+  permissions — read the repository, write issues and pull requests, no push.
+  This is the residual risk of running the review on untrusted PR content;
+  review only PRs from authors you trust with that. The learn job, which needs
+  no checkout, refuses one instead.
 - **Resolving threads** (`resolveReviewThread`) requires **Contents: Read and
   write**, so it is refused for a read-only App. The review then lists
   fixed-but-unresolved threads in its body instead; granting Contents write to

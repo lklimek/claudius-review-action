@@ -52,7 +52,8 @@ jobs:
     permissions:
       contents: read  # checkout only; the App token does all GitHub writes
     steps:
-      # First step, so the token outlives the job.
+      # GitHub App token (setup: docs/github-app.md). First step, so the
+      # token outlives the job.
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:

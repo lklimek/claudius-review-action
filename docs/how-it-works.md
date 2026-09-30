@@ -4,8 +4,9 @@ The action installs a small `ci-pr-review` skill and `claudius-ci-reviewer`
 agent (from [`claude/`](../claude)) into the runner's `~/.claude`, then asks
 Claude to run that skill. The skill:
 
-1. runs `claudius:check-pr-comments` — replies to and resolves threads that
-   are already fixed;
+1. runs `claudius:check-pr-comments` — replies to threads that are already
+   fixed and resolves them when the token may (needs Contents write; with the
+   recommended read-only App they are listed in the review body instead);
 2. runs `claudius:grumpy-review` with CI overrides — reviewers run **in
    parallel**, do **static review only** (no builds, tests or
    reproduction attempts; unconfirmed findings are reported, not dropped),

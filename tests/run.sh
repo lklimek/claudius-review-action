@@ -68,7 +68,7 @@ check "no-checkout: .git file (worktree/submodule) fails" "$(nocheckout | tail -
 
 # --- add-heart-reactions.sh ---
 hearts() { : > "$FX/calls.log"; STRUCTURED_OUTPUT="$1" bash "$SHARED/add-heart-reactions.sh" o/r "$out" >/dev/null 2>&1; echo $?; }
-posted() { grep -o 'pulls/comments/[0-9]*/reactions' "$FX/calls.log" | grep -o '[0-9]*' | paste -sd, -; }
+posted() { grep -o 'pulls/comments/[0-9]*/reactions' "$FX/calls.log" | grep -oE '[0-9]+' | paste -sd, -; }
 check "hearts exit ok" "$(hearts '{"heart_comment_ids":[2,1,5,6,999,20,7]}')" 0
 check "only privileged human comments hearted" "$(posted)" "2,6,20,7"
 check "content=heart sent" "$(grep -c 'content=heart' "$FX/calls.log")" 4

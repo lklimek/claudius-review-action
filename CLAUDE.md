@@ -37,7 +37,7 @@ README.md
 
 The flow lives in the `ci-pr-review` skill (`claude/skills/ci-pr-review/SKILL.md`); the prompt in `action.yml` only invokes it. Keep flow instructions in the skill, not the prompt.
 
-1. `claudius:check-pr-comments` — check and resolve previous review threads
+1. `claudius:check-pr-comments` — check previous review threads; reply to fixed ones and resolve them if the token may (needs Contents write — the recommended read-only App lists them in the review body instead)
 2. `claudius:grumpy-review` — all reviewers in parallel, static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
 3. Post the review with claudius `post_pr_review.py` (diff mapping, open-thread dedup; APPROVE when nothing unresolved remains, else COMMENT) — requires claudius ≥ 8.2.0
 

@@ -1,6 +1,6 @@
 ---
 name: ci-pr-review
-description: "Headless CI PR review flow for claudius-review-action: resolve fixed review threads, run claudius:grumpy-review with parallel static-only reviewers, post findings with post_pr_review.py. Use only inside claudius-review-action."
+description: "Headless CI PR review flow for claudius-review-action: handle fixed review threads (resolve when permitted, else list them), run claudius:grumpy-review with parallel static-only reviewers, post findings with post_pr_review.py. Use only inside claudius-review-action."
 ---
 
 # CI PR Review
