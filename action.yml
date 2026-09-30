@@ -522,15 +522,20 @@ runs:
       if: '!cancelled()'
       shell: bash
       run: |
-        # Reviews on this head commit submitted during this run, not by the PR
-        # author — matches any github_token identity. Newest first.
+        # Claudius reviews on this head commit submitted during this run, not by
+        # the PR author, newest first. Claudius = post_pr_review.py's attribution
+        # footer (always in its body), posted by a bot or a repo collaborator so
+        # an outsider pasting the footer does not count. Any github_token identity.
         IDS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tac | xargs)
+          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\"
+            and ((.body // \"\") | contains(\"${FOOTER}\"))
+            and (.user.type == \"Bot\" or (.author_association | IN(\"OWNER\", \"MEMBER\", \"COLLABORATOR\")))) | .id" | tac | xargs)
         echo "ids=${IDS}" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        FOOTER: "Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent"
 
     - name: Verify review report was produced
       if: '!cancelled()'
@@ -545,13 +550,13 @@ runs:
           exit 1
         fi
         # A report alone is not enough: post_pr_review.py must have posted a
-        # review on this head commit during this run (not one by the PR author).
+        # Claudius review on this head commit during this run.
         if [ "$LIST_OUTCOME" != "success" ]; then
           echo "::error::Could not list the PR's reviews to confirm one was posted (see 'List reviews posted this run')."
           exit 1
         fi
         if [ -z "$POSTED_IDS" ]; then
-          echo "::error::report.json exists but no review was posted on ${HEAD_SHA} during this run —" \
+          echo "::error::report.json exists but no Claudius review was posted on ${HEAD_SHA} during this run —" \
             "post_pr_review.py failed or was never called. The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
           exit 1
         fi
@@ -568,15 +573,11 @@ runs:
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Candidates (newest first) come from 'List reviews posted this run'. The
-        # filter can't tell whose review it is, so keep the first one this token
-        # can edit — a concurrent human review fails the PUT and is skipped.
-        # Reviews with an empty body are skipped too: GitHub rejects editing them
-        # (422 "Could not edit a review with a missing body"). Nothing edited →
-        # post a PR comment.
+        # Claudius reviews from 'List reviews posted this run', newest first; edit
+        # the first one this token can (one posted under another identity fails
+        # the PUT). Nothing edited → post a PR comment.
         for REVIEW_ID in $CANDIDATES; do
-          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty') || continue
-          [ -n "$BODY" ] || continue
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body') || continue
           CLEAN_BODY=$(printf '%s\n' "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
           UPDATED="${CLEAN_BODY}
         ${REPORT_LINE}"
