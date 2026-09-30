@@ -56,7 +56,7 @@ At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provide
 
 ## Which reviews count
 
-Learn works with any `github_token` identity the review action posted under (`github-actions[bot]`, a GitHub App such as `<app>[bot]`, a machine user). A review counts when both hold:
+Learn recognizes reviews posted under `github-actions[bot]`, a GitHub App (`<app>[bot]`), or a machine user that is a repository collaborator or organization member. A review counts when both hold:
 
 1. **Content** — its body contains either:
    - the claudius attribution footer, `Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius)` (added by claudius >= 8.2.0), or

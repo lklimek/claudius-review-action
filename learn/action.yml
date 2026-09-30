@@ -87,7 +87,8 @@ runs:
         bash "${{ github.action_path }}/shared/gather-review-data.sh" "$REPO" "$PR_NUMBER" "$TMPFILE"
 
         # Claudius reviews: claudius marker + bot/collaborator origin (see
-        # gather-review-data.sh); any github_token identity counts.
+        # gather-review-data.sh), so the posting identity must be a bot or a
+        # repo owner/member/collaborator.
         REVIEWS=$(jq '.stats.claudius_reviews' "$TMPFILE")
         THREADS=$(jq '.stats.claudius_threads' "$TMPFILE")
         if [ "$REVIEWS" -eq 0 ]; then

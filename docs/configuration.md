@@ -8,7 +8,7 @@
 | `claude_code_oauth_token` | No | `""` | Claude Code OAuth token (alternative to API key) |
 | `memcan_url` | No | `""` | MemCan server URL (e.g., `https://memcan.example.com`) |
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
-| `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI; the review is posted as this identity (see [Posting as a GitHub App](github-app.md)) |
+| `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI; the review is posted as this identity. The default applies only when the input is omitted — an explicitly passed empty value leaves the action without a token (use `<expr> \|\| github.token`, see [Posting as a GitHub App](github-app.md)) |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token`. **WARNING: bypasses a real security gate — keep it scoped to specific trusted accounts; avoid `*` on public repos** |
 | `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](../claude/agents); with a plugin agent (e.g. `claudius:claudius`) its frontmatter model may take precedence over `model` |
 | `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:grumpy-review`. Empty = Claude Code default |

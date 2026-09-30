@@ -122,5 +122,5 @@ jobs:
           memcan_url: ${{ secrets.MEMCAN_URL }}
           memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
           # project_name: my-repo
-          # min_review_comments: "1"  # Claudius inline review comments, any posting identity
+          # min_review_comments: "1"  # Claudius inline review comments (see docs/learn.md, "Which reviews count")
           # plugins / plugin_marketplaces / allowed_tools / claude_extra_args: see docs/learn.md
