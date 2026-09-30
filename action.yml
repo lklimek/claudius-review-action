@@ -23,7 +23,7 @@ inputs:
     required: false
     default: ""
   github_token:
-    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see README's 'Posting as a GitHub App') to post as <app>[bot]."
+    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see docs/github-app.md) to post as <app>[bot]."
     required: false
     default: ${{ github.token }}
   allowed_non_write_users:
@@ -63,7 +63,7 @@ inputs:
     required: false
     default: "true"
   reviewer_login:
-    description: "GitHub login requested as reviewer to clear from pending review requests on success — set this when triggering via review_requested (see README's 'Triggering by Review Request'). The review itself is posted under whichever GitHub identity github_token authenticates as, not this account, so GitHub never auto-clears this account's own pending request; leave empty (default) to skip this step, e.g. when only using the label trigger."
+    description: "GitHub login requested as reviewer to clear from pending review requests on success — set this when triggering via review_requested (see docs/triggers.md). The review itself is posted under whichever GitHub identity github_token authenticates as, not this account, so GitHub never auto-clears this account's own pending request; leave empty (default) to skip this step, e.g. when only using the label trigger."
     required: false
     default: ""
   remove_review_request_on_success:

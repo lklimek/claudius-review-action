@@ -1,18 +1,15 @@
 # Claudius PR Review Action
 
-A reusable GitHub composite action that wraps [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) into a single step for AI-powered PR code reviews. It runs the Claudius review pipeline — checking previous comments, performing a fresh multi-specialist code review, posting inline findings, and optionally approving clean PRs.
+A reusable GitHub composite action that wraps [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) for AI-powered PR reviews with the Claudius pipeline: it resolves fixed review threads, runs a multi-specialist static review, posts inline findings and approves the PR when nothing unresolved remains. Requires claudius >= 8.2.0 (installed at run time).
 
-## Minimal Usage
+## Usage
+
+Label a PR `claudius-review` to start a review; new pushes re-review while the label stays. Full file: [`examples/minimal.yml`](examples/minimal.yml).
 
 ```yaml
-name: Claudius Review
 on:
   pull_request:
     types: [labeled, synchronize]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   review:
@@ -35,356 +32,40 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-## Extended Usage
+[`examples/full.yml`](examples/full.yml) shows every input, the review-request trigger, GitHub App token minting and the learn job.
 
-```yaml
-name: Claudius Review
-on:
-  pull_request:
-    types: [labeled, synchronize]
+## Required permissions
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  review:
-    if: >
-      github.event.pull_request.draft == false &&
-      (
-        (github.event.action == 'labeled' && github.event.label.name == 'ai-review') ||
-        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review'))
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-      id-token: write
-    env:
-      CLAUDE_CODE_MAX_TURNS: "200"
-      CLAUDE_CODE_EFFORT_LEVEL: high
-    steps:
-      - uses: lklimek/claudius-review-action@v3
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: sonnet
-          upload_transcripts: "true"
-          transcripts_recipients: github:your-login
-          memcan_url: ${{ secrets.MEMCAN_URL }}
-          memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
-          trigger_label: ai-review
-          prompt_extra: |
-            Focus especially on security issues and SQL injection vectors.
-            This is a monorepo — review only files under packages/.
-          plugins: |
-            claudius@lklimek
-            claudash@lklimek
-            memcan@lklimek
-            my-custom-plugin@my-org
-          plugin_marketplaces: |
-            https://github.com/lklimek/agents.git
-            https://github.com/my-org/agents.git
-```
-
-## Triggering by Review Request
-
-Instead of a label, you can trigger a review by requesting the bot account
-as a PR reviewer:
-
-```yaml
-name: Claudius Review
-on:
-  pull_request:
-    types: [review_requested, synchronize]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  review:
-    if: >
-      github.event.pull_request.draft == false &&
-      (
-        (github.event.action == 'review_requested' && github.event.requested_reviewer.login == 'Claudius-Maginificent') ||
-        (github.event.action == 'synchronize' && contains(github.event.pull_request.requested_reviewers.*.login, 'Claudius-Maginificent'))
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-      id-token: write
-    steps:
-      - uses: lklimek/claudius-review-action@v3
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          remove_label_on_success: false
-          reviewer_login: Claudius-Maginificent
-```
-
-`review_requested` fires the moment the account is requested as a reviewer;
-the `synchronize` branch re-triggers on new pushes as long as that request is
-still pending. Set `remove_label_on_success: false` since there's no trigger
-label in this mode — but set `reviewer_login` to the same account named in
-the `if:` condition above, or the pending request never clears: the review
-itself is posted under whichever GitHub identity `github_token` authenticates
-as, not under `reviewer_login`, so GitHub does **not** auto-clear that
-account's own pending review request the way it would if it had reviewed
-itself. Without `reviewer_login` set, the request stays forever and every
-subsequent push re-triggers a full review. To get a fresh review later, just
-re-request the review; that fires a new `review_requested` event instead of
-re-applying a label.
-
-Requires the reviewer account to be an actual collaborator (not just
-implicit public-repo read access) with at least `read`/`triage` permission —
-otherwise it won't show up in GitHub's reviewer picker at all.
-
-This mode is still gated by the same write-access preflight described in
-["Triggering by non-write actors"](#triggering-by-non-write-actors) above —
-it checks `github.event.sender.login` (whoever requested the review, or
-pushed on `synchronize`), not the reviewer being requested. If that person
-or bot doesn't have `write`/`admin` access, add them to
-`allowed_non_write_users` the same way you would for the label trigger.
-
-## How It Works
-
-The action installs a small `ci-pr-review` skill and `claudius-ci-reviewer`
-agent (from [`claude/`](claude)) into the runner's `~/.claude`, then asks
-Claude to run that skill. The skill:
-
-1. runs `claudius:check-pr-comments` — replies to and resolves threads that
-   are already fixed;
-2. runs `claudius:grumpy-review` with CI overrides — reviewers run **in
-   parallel**, do **static review only** (no builds, tests or
-   reproduction attempts; unconfirmed findings are reported, not dropped),
-   and a report is **always** written, even when nothing was found;
-3. posts the review with claudius's `post_pr_review.py`, which maps findings
-   onto the diff, skips ones already raised in open threads and approves the
-   PR when nothing is left unresolved.
-
-Requires **claudius ≥ 8.2.0** (installed from the marketplace at run time).
-All GitHub access goes through the `gh` CLI (no GitHub MCP server).
-
-**Permissions.** The default `allowed_tools` holds only what the flow needs:
-file tools, read-only `git` and `gh pr` commands, the claudius plugin scripts
-and MemCan search. `gh api`, `env`, `curl` and shells are not on it. This
-raises the bar for prompt injection via PR content but is not a sandbox: file
-tools are not confined to the workspace, so only run reviews on PRs from
-authors you trust with the job's secrets.
-
-**MemCan preflight.** When `memcan_url`/`memcan_api_key` are set, the action
-probes `/health` and an MCP `initialize` (status codes only, session closed
-afterwards) and continues without MemCan if the server isn't usable. It warns
-when the URL is plain HTTP to a non-local host. MemCan is search-only in CI:
-write tools are always denied, since PR content is untrusted.
-
-This repository reviews its own non-draft PRs with the PR's version of the
-action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).
-
-## Upgrading from v2
-
-v3 is a breaking release:
-
-- **claudius ≥ 8.2.0 is required** — the review is posted by its `post_pr_review.py`; the job fails with an older plugin.
-- **Narrower default `allowed_tools`** — a static allowlist of what the flow needs; custom review flows relying on other tools must pass their own list.
-- **Changed flow** — reviewers run in parallel, and the job fails when no review was posted for the head commit.
+`contents: read`, `issues: write`, `pull-requests: write`, `id-token: write`. Only actors with write/admin access can trigger a review by default; see [Triggers](docs/triggers.md) for bots and the review-request mode.
 
 ## Inputs
 
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `anthropic_api_key` | No | `""` | Anthropic API key (alternative to OAuth) |
-| `claude_code_oauth_token` | No | `""` | Claude Code OAuth token (alternative to API key) |
-| `memcan_url` | No | `""` | MemCan server URL (e.g., `https://memcan.example.com`) |
-| `memcan_api_key` | No | `""` | MemCan API key for server authentication |
-| `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI; the review is posted as this identity (see [Posting as a GitHub App](#posting-as-a-github-app)) |
-| `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |
-| `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](claude/agents); a plugin agent (e.g. `claudius:claudius`) uses its own frontmatter model instead of `model` |
-| `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:grumpy-review`. Empty = Claude Code default |
-| `plugins` | No | `claudius@lklimek`, `claudash@lklimek`, `memcan@lklimek` | Newline-separated plugin list |
-| `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
-| `prompt_extra` | No | `""` | Additional instructions appended to core prompt |
-| `trigger_label` | No | `claudius-review` | Label to remove on success |
-| `remove_label_on_success` | No | `true` | Whether to remove trigger label |
-| `reviewer_login` | No | `""` | GitHub login to clear from pending review requests on success (review-request trigger mode only). No-op when empty |
-| `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
-| `checkout` | No | `true` | Whether action handles git checkout (the PR head commit). If `false`, check out the PR head yourself with enough history to reach `origin/<base>` |
-| `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true). Reviewers diff against `origin/<base>`, so keep `0` or deep enough to reach the merge base |
-| `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude. The default covers the review flow; MemCan write tools are always denied |
-| `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
-| `report_retention_days` | No | `14` | Artifact retention days |
-| `upload_transcripts` | No | `false` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as a GPG-encrypted artifact. Requires `transcripts_recipients` — the action fails instead of uploading plaintext |
-| `transcript_retention_days` | No | `7` | Retention days for the transcripts artifact |
-| `transcripts_recipients` | No | `""` | Newline-separated GPG public keys to encrypt transcripts to: `github:<login>` (keys from `github.com/<login>.gpg`), an `https://` URL to an armored key, or a fingerprint (from keys.openpgp.org). Full 40-hex fingerprints only. Public keys only — no secret needed. Decrypt: `gpg -d claude-transcripts.tar.gz.gpg \| tar xz` |
-| `debug_output` | No | `false` | Show full raw Claude Code JSON output in the job log. Also turns on automatically when GitHub's "Enable debug logging" re-run checkbox is checked. **WARNING: may leak secrets/tokens into publicly-visible Actions logs — enable only for troubleshooting**, and be aware that checkbox trips the same warning |
+One credential is required: `anthropic_api_key` or `claude_code_oauth_token`. Everything else is optional.
 
-At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
+| Group | Inputs |
+|-------|--------|
+| Credentials | `anthropic_api_key`, `claude_code_oauth_token`, `github_token` |
+| Trigger | `trigger_label`, `remove_label_on_success`, `reviewer_login`, `remove_review_request_on_success`, `allowed_non_write_users` |
+| Model and plugins | `model` (default `sonnet`), `claude_agent`, `plugins`, `plugin_marketplaces`, `prompt_extra` |
+| MemCan | `memcan_url`, `memcan_api_key` |
+| Checkout | `checkout`, `fetch_depth` |
+| Tools and CLI | `allowed_tools`, `claude_extra_args` |
+| Artifacts | `report_retention_days`, `upload_transcripts`, `transcripts_recipients`, `transcript_retention_days` |
+| Debug | `debug_output` (may leak secrets into logs) |
 
-### Triggering by non-write actors
+Outputs: `report_artifact_name`, `transcripts_artifact_name`. Defaults, descriptions and environment variables: [Configuration reference](docs/configuration.md).
 
-By default, only actors with `admin` or `write` repo access can trigger a
-review (add/re-add the trigger label, or push to an already-labeled PR). This
-is enforced twice: a fast preflight in this action, and again inside
-`claude-code-action` itself — both exist because the underlying action's own
-rejection is an opaque error surfacing ~40s into setup.
+## GitHub App identity
 
-If a bot or service account with only `triage` permission (e.g. one that
-applies the trigger label on your behalf) needs to trigger reviews, add it to
-`allowed_non_write_users`:
+The review is posted as whichever identity `github_token` authenticates as: `github-actions[bot]` by default, or `<app-slug>[bot]` when you pass a GitHub App installation token minted in your workflow. Setup, permissions and token-lifetime notes: [Posting as a GitHub App](docs/github-app.md).
 
-```yaml
-with:
-  allowed_non_write_users: my-triage-bot
-```
+## More
 
-Use a comma-separated list for multiple accounts, or `*` to allow any actor
-(not recommended on public repos — see the input's description in
-[`action.yml`](action.yml) for the security caveat).
-
-### Posting as a GitHub App
-
-By default the review is posted as `github-actions[bot]` (`GITHUB_TOKEN`). To
-post under your own GitHub App identity (`<app-slug>[bot]`), mint a
-short-lived installation token in the **caller** workflow and pass it as
-`github_token`:
-
-```yaml
-steps:
-  - uses: actions/create-github-app-token@v3
-    id: app-token
-    with:
-      client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
-      private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
-      repositories: ${{ github.event.repository.name }}
-      permission-contents: read
-      permission-issues: write
-      permission-pull-requests: write
-  - uses: lklimek/claudius-review-action@v3
-    with:
-      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      github_token: ${{ steps.app-token.outputs.token }}
-```
-
-App setup: repository permissions **Contents: Read-only** (no push),
-**Issues: Read & write**, **Pull requests: Read & write** (Metadata: Read is
-implicit); webhook disabled; installed on the target repository. The job's
-`permissions:` still apply — the checkout uses `GITHUB_TOKEN`.
-
-- **Key handling.** The action deliberately takes a token, not the App's
-  private key: the key can mint tokens for every installation of the App until
-  rotated. Pass it only in the token step's `with:` — never in job- or
-  workflow-level `env:`, which the Claude session's step inherits.
-- **Token lifetime.** Installation tokens expire 1 hour after minting (and
-  `create-github-app-token` revokes them when the job ends). Mint the token in
-  the job's first step and keep `timeout-minutes` at 60 or less, so the job
-  always ends before the token does.
-- **Resolving threads** (`resolveReviewThread`) requires **Contents: Read &
-  write** — it is refused for a read-only App, exactly as for a read-only
-  `GITHUB_TOKEN`. The review then lists fixed-but-unresolved threads in its
-  body instead; granting Contents write to fix this also grants push.
-- **Workflow triggers.** Unlike `GITHUB_TOKEN`, App-token activity triggers
-  other workflows: the review fires `pull_request_review`, the report link
-  edit `pull_request_review` (`edited`), the fallback comment `issue_comment`
-  and label removal `pull_request` (`unlabeled`).
-
-## Claude Code Environment Variables
-
-Claude Code behavior (effort, turns, etc.) is controlled via environment variables set at the **workflow level** — except the coordinator model, which is the `model` input (see below). The action's pre-flight step logs all recognized variables — check the "Claude Code environment" group in the workflow output for the effective configuration.
-
-Set them in your workflow's `env:` block:
-
-```yaml
-jobs:
-  review:
-    env:
-      CLAUDE_CODE_MAX_TURNS: "150"
-      CLAUDE_CODE_EFFORT_LEVEL: high
-```
-
-The coordinator model is set by the `model` input (default `sonnet`), not by
-`ANTHROPIC_MODEL`. Reviewer sub-agents get their models per role from
-`claudius:grumpy-review`; leave `CLAUDE_CODE_SUBAGENT_MODEL` unset.
-
-## Outputs
-
-| Output | Description |
-|--------|-------------|
-| `report_artifact_name` | Name of the uploaded review report artifact |
-| `transcripts_artifact_name` | Name of the uploaded transcripts artifact (when `upload_transcripts` is `true`) |
-
-## Required Permissions
-
-```yaml
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
-  id-token: write
-```
-
-## Learn Action
-
-The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v3`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
-
-### Quick Start
-
-```yaml
-name: Claudius Learn
-on:
-  pull_request:
-    types: [closed]
-
-jobs:
-  learn:
-    if: github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      pull-requests: write
-    env:
-      ANTHROPIC_MODEL: sonnet
-    steps:
-      - uses: lklimek/claudius-review-action/learn@v3
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          memcan_url: ${{ secrets.MEMCAN_URL }}
-          memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
-```
-
-See [`examples/learn.yml`](examples/learn.yml) for a standalone workflow and [`examples/combined.yml`](examples/combined.yml) for both review and learn in one file.
-
-### Learn Inputs
-
-| Input | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `anthropic_api_key` | No | `""` | Anthropic API key (alternative to OAuth) |
-| `claude_code_oauth_token` | No | `""` | Claude Code OAuth token (alternative to API key) |
-| `memcan_url` | **Yes** | | MemCan server URL (e.g., `http://host:8190`) |
-| `memcan_api_key` | **Yes** | | MemCan API key for server authentication |
-| `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
-| `project_name` | No | `${{ github.event.repository.name }}` | MemCan project scope |
-| `min_review_comments` | No | `1` | Minimum review comments to trigger learning |
-| `plugins` | No | `memcan@lklimek` | Newline-separated plugin list |
-| `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
-| `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
-| `claude_extra_args` | No | `""` | Additional Claude Code CLI flags |
-
-At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provided.
-
-### Trigger Requirements
-
-- Workflow must trigger on `pull_request: [closed]`
-- Job condition should check `github.event.pull_request.merged == true`
-- `contents: read` and `pull-requests: write` permissions are needed (`write` for heart reactions)
-
-### Cost
-
-The learn action exits early (zero cost) when preconditions are not met (no claude[bot] reviews, not merged, below comment threshold). When it does run, Sonnet or Haiku is recommended -- expect approximately $0.02-0.06 per invocation depending on PR size.
+- [Triggers](docs/triggers.md): label, review request, non-write actors
+- [Configuration reference](docs/configuration.md): all inputs, outputs, env vars
+- [How it works](docs/how-it-works.md): review flow, tool allowlist, MemCan preflight
+- [GitHub App](docs/github-app.md)
+- [Learn action](docs/learn.md): extract review learnings into MemCan after merge
 
 ---
 

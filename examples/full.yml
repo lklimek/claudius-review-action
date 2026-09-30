@@ -1,0 +1,122 @@
+---
+# Every input of the action, plus the review-request trigger and the learn
+# action. Delete what you do not need; every input except one credential is optional.
+# Details: docs/configuration.md, docs/triggers.md, docs/github-app.md, docs/learn.md
+name: Claudius Review (full)
+
+"on":
+  pull_request:
+    # `closed` is only needed for the learn job below.
+    types: [labeled, synchronize, closed]
+    # Review-request trigger instead of a label: use
+    #   types: [review_requested, synchronize, closed]
+    # and swap the `if:` of the review job for the commented one.
+
+jobs:
+  review:
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.merged != true &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'ai-review') ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ai-review'))
+      )
+    # Review-request alternative:
+    # if: >
+    #   github.event.pull_request.draft == false &&
+    #   (
+    #     (github.event.action == 'review_requested' && github.event.requested_reviewer.login == 'Claudius-Maginificent') ||
+    #     (github.event.action == 'synchronize' && contains(github.event.pull_request.requested_reviewers.*.login, 'Claudius-Maginificent'))
+    #   )
+    concurrency:
+      group: claudius-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45  # keep <= 60 when using a GitHub App token
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      id-token: write
+    # Claude Code behaviour is tuned via env vars (docs/configuration.md).
+    env:
+      CLAUDE_CODE_MAX_TURNS: "200"
+      CLAUDE_CODE_EFFORT_LEVEL: high
+    steps:
+      # Optional: post as your own GitHub App (<slug>[bot]). Mint the token first.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
+
+      - uses: lklimek/claudius-review-action@v3
+        with:
+          # Credentials: at least one of the two.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Identity the review is posted as.
+          github_token: ${{ steps.app-token.outputs.token }}
+          allowed_non_write_users: my-triage-bot
+          # MemCan (optional, search-only in CI).
+          memcan_url: ${{ secrets.MEMCAN_URL }}
+          memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
+          # Agent, model, plugins.
+          claude_agent: claudius-ci-reviewer
+          model: sonnet
+          plugins: |
+            claudius@lklimek
+            claudash@lklimek
+            memcan@lklimek
+            my-custom-plugin@my-org
+          plugin_marketplaces: |
+            https://github.com/lklimek/agents.git
+            https://github.com/my-org/agents.git
+          prompt_extra: |
+            Focus especially on security issues and SQL injection vectors.
+            This is a monorepo - review only files under packages/.
+          # Trigger cleanup.
+          trigger_label: ai-review
+          remove_label_on_success: "true"
+          # Review-request mode: set the login used in the `if:` above.
+          reviewer_login: ""
+          remove_review_request_on_success: "true"
+          # Checkout.
+          checkout: "true"
+          fetch_depth: "0"
+          # Tools and raw CLI flags (default allowlist: see action.yml).
+          # allowed_tools: "..."
+          claude_extra_args: ""
+          # Artifacts.
+          report_retention_days: "30"
+          upload_transcripts: "true"
+          transcript_retention_days: "7"
+          transcripts_recipients: github:your-login
+          # WARNING: may leak secrets into public logs; troubleshooting only.
+          debug_output: "false"
+
+  learn:
+    if: >
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      ANTHROPIC_MODEL: sonnet
+    steps:
+      - uses: lklimek/claudius-review-action/learn@v3
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          memcan_url: ${{ secrets.MEMCAN_URL }}
+          memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
+          # project_name: my-repo
+          # min_review_comments: "1"
+          # plugins / plugin_marketplaces / allowed_tools / claude_extra_args: see docs/learn.md
