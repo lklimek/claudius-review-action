@@ -2,6 +2,7 @@
 # Add a heart reaction to the review comments the learn agent saved learnings
 # from. Only comments present in the gathered data file whose author is a repo
 # owner/member/collaborator are eligible; at most 5 (the per-PR learning cap).
+# Unlike trusted_origin, bots are excluded: a heart credits a human's input.
 #
 # Usage: add-heart-reactions.sh <owner/repo> <data_file>
 #
@@ -23,9 +24,10 @@ if ! [[ "$owner_repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
   exit 1
 fi
 
-ids=$(jq -r --slurpfile data "$data_file" '
+lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)"
+ids=$(jq -r -L "$lib_dir" --slurpfile data "$data_file" 'include "claudius";
   ([$data[0].threads[] | .reviewer_comment, .responses[]
-    | select(.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))
+    | select(.author_association | privileged_association)
     | .comment_id]) as $eligible
   | [(.heart_comment_ids // [])[] | select(type == "number" and . == floor)]
   | reduce .[] as $id ([]; if any(.[]; . == $id) then . else . + [$id] end)

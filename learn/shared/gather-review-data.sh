@@ -35,6 +35,7 @@ if [[ -z "$output_file" ]]; then
 fi
 
 MAX_BODY_LENGTH=500
+lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)"
 
 truncate_body() {
   local body="$1"
@@ -52,17 +53,13 @@ echo "Fetching PR metadata..."
 pr_json=$(gh api "repos/${owner}/${repo}/pulls/${pr_number}" \
   --jq '{number: .number, title: .title, author: .user.login, merged_at: .merged_at}')
 
-# Claudius reviews: a claudius marker in the body (attribution footer from
-# post_pr_review.py >= 8.2.0, or this action's report-link line) AND an origin
-# an outsider cannot forge — a bot (only installed Apps / Actions can post as
-# one) or a repo owner/member/collaborator. Covers any github_token identity.
+# Claudius reviews: a claudius marker in the body (attribution footer or this
+# action's report-link line) AND a trusted origin (see lib/claudius.jq).
 echo "Fetching Claudius reviews..."
 reviews_json=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr_number}/reviews" \
-  --jq '.[] | select(((.body // "") | contains("Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius)")
-      or test("(^|\n)📊 \\*\\*\\[View full HTML review report\\]\\("))
-    and (.user.type == "Bot" or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))))
-    | {id, user: .user.login}' \
-  | jq -s '.')
+  | jq -s -L "$lib_dir" 'include "claudius";
+    add // [] | map(select(((.body // "") | contains(claudius_footer) or claudius_report_line)
+      and trusted_origin) | {id, user: .user.login})')
 
 # Fetch review threads via GraphQL (includes resolution status and all comments)
 echo "Fetching review threads via GraphQL..."
@@ -100,16 +97,15 @@ threads_json=$(gh api graphql \
 # whole, untrusted replies individually.
 echo "Processing thread data..."
 thread_nodes=$(echo "$threads_json" | jq '.data.repository.pullRequest.reviewThreads.nodes')
-trusted_filter='def trusted: .author.__typename == "Bot" or ((.authorAssociation // "NONE") | IN("OWNER", "MEMBER", "COLLABORATOR"));'
-untrusted_dropped=$(echo "$thread_nodes" | jq "$trusted_filter"'
-  [.[] | (.comments.nodes // []) | if (.[0] | trusted) then map(select(trusted | not)) else . end | length] | add // 0')
-processed_threads=$(echo "$thread_nodes" | jq --argjson max_len "$MAX_BODY_LENGTH" \
-  --argjson ids "$(echo "$reviews_json" | jq '[.[].id]')" "$trusted_filter"'
+untrusted_dropped=$(echo "$thread_nodes" | jq -L "$lib_dir" 'include "claudius";
+  [.[] | (.comments.nodes // []) | if (.[0] | trusted_origin) then map(select(trusted_origin | not)) else . end | length] | add // 0')
+processed_threads=$(echo "$thread_nodes" | jq -L "$lib_dir" --argjson max_len "$MAX_BODY_LENGTH" \
+  --argjson ids "$(echo "$reviews_json" | jq '[.[].id]')" 'include "claudius";
   map(
     . as $thread |
     ($thread.comments.nodes // []) as $all |
-    if ($all | length) == 0 or ($all[0] | trusted | not) then empty
-    else ($all | map(select(trusted))) as $comments |
+    if ($all | length) == 0 or ($all[0] | trusted_origin | not) then empty
+    else ($all | map(select(trusted_origin))) as $comments |
       {
         id: $thread.id,
         file: ($comments[0].path // "unknown"),

@@ -524,12 +524,14 @@ runs:
       run: |
         # Claudius reviews on this head commit submitted during this run, not by
         # the PR author, newest first. Claudius = post_pr_review.py's attribution
-        # footer (always in its body), posted by a bot or a repo collaborator so
-        # an outsider pasting the footer does not count. Any github_token identity.
+        # footer (always in its body) from a trusted origin, so an outsider
+        # pasting the footer does not count (see lib/claudius.jq).
         ROWS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\"
-            and ((.body // \"\") | contains(\"${FOOTER}\"))
-            and (.user.type == \"Bot\" or (.author_association | IN(\"OWNER\", \"MEMBER\", \"COLLABORATOR\")))) | \"\\(.id) \\(.user.login)\"" | tac)
+          | jq -s -r -L "${{ github.action_path }}/lib" \
+            --arg head "$HEAD_SHA" --arg since "$REVIEW_STARTED_AT" --arg author "$PR_AUTHOR" 'include "claudius";
+            add // [] | .[] | select(.commit_id == $head and .submitted_at >= $since and .user.login != $author
+              and ((.body // "") | contains(claudius_footer)) and trusted_origin)
+            | "\(.id) \(.user.login)"' | tac)
         IDS=$(printf '%s\n' "$ROWS" | cut -d' ' -f1 | xargs)
         if [ -n "$IDS" ]; then
           echo "Claudius review posted as @$(printf '%s\n' "$ROWS" | head -n1 | cut -d' ' -f2)"
@@ -539,7 +541,6 @@ runs:
         GH_TOKEN: ${{ inputs.github_token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        FOOTER: "Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent"
 
     - name: Verify review report was produced
       if: '!cancelled()'
