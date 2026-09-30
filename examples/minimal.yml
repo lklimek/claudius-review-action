@@ -24,7 +24,6 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-      id-token: write
     steps:
       - uses: lklimek/claudius-review-action@v3
         with:

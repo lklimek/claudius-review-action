@@ -30,7 +30,6 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-      id-token: write
     steps:
       - uses: lklimek/claudius-review-action@v3
         with:
@@ -41,7 +40,7 @@ jobs:
 
 ## Required permissions
 
-`contents: read`, `issues: write`, `pull-requests: write`, `id-token: write`. Only actors with write/admin access can trigger a review by default; see [Triggers](docs/triggers.md) for bots and the review-request mode.
+`contents: read`, `issues: write`, `pull-requests: write`. Do not grant `id-token: write`: the action always passes `github_token`, so `claude-code-action` never needs its OIDC exchange, and the permission would let any step (including the review agent) mint OIDC tokens. Only actors with write/admin access can trigger a review by default; see [Triggers](docs/triggers.md) for bots and the review-request mode.
 
 ## Inputs
 

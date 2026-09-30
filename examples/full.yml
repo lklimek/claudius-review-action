@@ -39,7 +39,6 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-      id-token: write
     # Claude Code behaviour is tuned via env vars (docs/configuration.md).
     env:
       CLAUDE_CODE_MAX_TURNS: "200"

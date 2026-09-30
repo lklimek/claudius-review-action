@@ -24,7 +24,6 @@ jobs:
       contents: read
       issues: write
       pull-requests: write
-      id-token: write
     steps:
       # Post as claudbot[bot]. Must stay the first step: the 1h token then
       # outlives the 60-minute job. The private key only reaches this step.
