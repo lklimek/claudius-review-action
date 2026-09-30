@@ -83,8 +83,8 @@ runs:
         TMPFILE=$(mktemp /tmp/claudius-learn-XXXXXX.json)
         bash "${{ github.action_path }}/shared/gather-review-data.sh" "$REPO" "$PR_NUMBER" "$TMPFILE"
 
-        # Claudius reviews are recognised by content, not author: any github_token
-        # identity (github-actions[bot], a GitHub App, a machine user) counts.
+        # Claudius reviews: claudius marker + bot/collaborator origin (see
+        # gather-review-data.sh); any github_token identity counts.
         REVIEWS=$(jq '.stats.claudius_reviews' "$TMPFILE")
         THREADS=$(jq '.stats.claudius_threads' "$TMPFILE")
         if [ "$REVIEWS" -eq 0 ]; then

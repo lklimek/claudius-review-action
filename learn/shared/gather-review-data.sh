@@ -52,12 +52,16 @@ echo "Fetching PR metadata..."
 pr_json=$(gh api "repos/${owner}/${repo}/pulls/${pr_number}" \
   --jq '{number: .number, title: .title, author: .user.login, merged_at: .merged_at}')
 
-# Claudius reviews, whichever identity posted them: the claudius attribution
-# footer (post_pr_review.py >= 8.2.0) or this action's report-link line.
+# Claudius reviews: a claudius marker in the body (attribution footer from
+# post_pr_review.py >= 8.2.0, or this action's report-link line) AND an origin
+# an outsider cannot forge — a bot (only installed Apps / Actions can post as
+# one) or a repo owner/member/collaborator. Covers any github_token identity.
 echo "Fetching Claudius reviews..."
 reviews_json=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr_number}/reviews" \
-  --jq '.[] | select((.body // "") | contains("Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius)")
-    or test("(^|\n)📊 \\*\\*\\[View full HTML review report\\]\\(")) | {id, user: .user.login}' \
+  --jq '.[] | select(((.body // "") | contains("Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius)")
+      or test("(^|\n)📊 \\*\\*\\[View full HTML review report\\]\\("))
+    and (.user.type == "Bot" or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))))
+    | {id, user: .user.login}' \
   | jq -s '.')
 
 # Fetch review threads via GraphQL (includes resolution status and all comments)
