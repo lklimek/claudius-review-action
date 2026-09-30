@@ -10,7 +10,7 @@
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
 | `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI; the review is posted as this identity (see [Posting as a GitHub App](github-app.md)) |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |
-| `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](../claude/agents); a plugin agent (e.g. `claudius:claudius`) uses its own frontmatter model instead of `model` |
+| `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](../claude/agents); with a plugin agent (e.g. `claudius:claudius`) its frontmatter model may take precedence over `model` |
 | `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:grumpy-review`. Empty = Claude Code default |
 | `plugins` | No | `claudius@lklimek`, `claudash@lklimek`, `memcan@lklimek` | Newline-separated plugin list |
 | `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
@@ -33,7 +33,7 @@ At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provide
 
 ## Claude Code environment variables
 
-Claude Code behavior (effort, turns, etc.) is controlled via environment variables set at the **workflow level** — except the coordinator model, which is the `model` input . The action's pre-flight step logs all recognized variables — check the "Claude Code environment" group in the workflow output for the effective configuration.
+Claude Code behavior (effort, turns, etc.) is controlled via environment variables set at the **workflow level**. The action's pre-flight step logs all recognized variables — check the "Claude Code environment" group in the workflow output for the effective configuration.
 
 Set them in your workflow's `env:` block:
 

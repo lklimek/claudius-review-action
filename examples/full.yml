@@ -44,6 +44,8 @@ jobs:
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
       # Optional: post as your own GitHub App (<slug>[bot]). Mint the token first.
+      # Dropping this step? Drop `github_token` below too: an empty value is
+      # passed as-is, not replaced by the default.
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:

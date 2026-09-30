@@ -40,6 +40,8 @@ implicit); webhook disabled; installed on the target repository. The job's
   `GITHUB_TOKEN`. The review then lists fixed-but-unresolved threads in its
   body instead; granting Contents write to fix this also grants push.
 - **Workflow triggers.** Unlike `GITHUB_TOKEN`, App-token activity triggers
-  other workflows: the review fires `pull_request_review`, the report link
-  edit `pull_request_review` (`edited`), the fallback comment `issue_comment`
-  and label removal `pull_request` (`unlabeled`).
+  other workflows: the review and report-link edit fire `pull_request_review`,
+  thread replies `pull_request_review_comment`, thread resolution
+  `pull_request_review_thread`, the fallback comment `issue_comment`, and
+  label or review-request removal `pull_request` (`unlabeled`,
+  `review_request_removed`).

@@ -25,7 +25,7 @@ learn/
 examples/
   minimal.yml           # Minimal workflow
   full.yml              # Every input + review-request trigger + learn job
-docs/                   # Detail moved out of README: triggers, configuration, github-app, how-it-works, learn
+docs/                   # Detailed docs linked from README: triggers, configuration, github-app, how-it-works, learn
 README.md
 ```
 
