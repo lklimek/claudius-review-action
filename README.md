@@ -270,14 +270,26 @@ steps:
 ```
 
 App setup: repository permissions **Contents: Read-only** (no push),
-**Issues: Read & write**, **Pull requests: Read & write**; webhook disabled;
-installed on the target repository.
+**Issues: Read & write**, **Pull requests: Read & write** (Metadata: Read is
+implicit); webhook disabled; installed on the target repository. The job's
+`permissions:` still apply — the checkout uses `GITHUB_TOKEN`.
 
-The action deliberately takes a token, not the App's private key: the key can
-mint tokens for every installation of the App until rotated, so it should only
-ever reach `actions/create-github-app-token`, never third-party action code.
-Installation tokens expire after 1 hour — keep the job's `timeout-minutes`
-below that, or posting at the end of a long review will fail.
+- **Key handling.** The action deliberately takes a token, not the App's
+  private key: the key can mint tokens for every installation of the App until
+  rotated. Pass it only in the token step's `with:` — never in job- or
+  workflow-level `env:`, which the Claude session's step inherits.
+- **Token lifetime.** Installation tokens expire 1 hour after minting (and
+  `create-github-app-token` revokes them when the job ends). Mint the token in
+  the job's first step and keep `timeout-minutes` at 60 or less, so the job
+  always ends before the token does.
+- **Resolving threads** (`resolveReviewThread`) requires **Contents: Read &
+  write** — it is refused for a read-only App, exactly as for a read-only
+  `GITHUB_TOKEN`. The review then lists fixed-but-unresolved threads in its
+  body instead; granting Contents write to fix this also grants push.
+- **Workflow triggers.** Unlike `GITHUB_TOKEN`, App-token activity triggers
+  other workflows: the review fires `pull_request_review`, the report link
+  edit `pull_request_review` (`edited`), the fallback comment `issue_comment`
+  and label removal `pull_request` (`unlabeled`).
 
 ## Claude Code Environment Variables
 
