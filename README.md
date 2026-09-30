@@ -201,7 +201,7 @@ v3 is a breaking release:
 | `claude_code_oauth_token` | No | `""` | Claude Code OAuth token (alternative to API key) |
 | `memcan_url` | No | `""` | MemCan server URL (e.g., `https://memcan.example.com`) |
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
-| `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
+| `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI; the review is posted as this identity (see [Posting as a GitHub App](#posting-as-a-github-app)) |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |
 | `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](claude/agents); a plugin agent (e.g. `claudius:claudius`) uses its own frontmatter model instead of `model` |
 | `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:grumpy-review`. Empty = Claude Code default |
@@ -244,6 +244,40 @@ with:
 Use a comma-separated list for multiple accounts, or `*` to allow any actor
 (not recommended on public repos — see the input's description in
 [`action.yml`](action.yml) for the security caveat).
+
+### Posting as a GitHub App
+
+By default the review is posted as `github-actions[bot]` (`GITHUB_TOKEN`). To
+post under your own GitHub App identity (`<app-slug>[bot]`), mint a
+short-lived installation token in the **caller** workflow and pass it as
+`github_token`:
+
+```yaml
+steps:
+  - uses: actions/create-github-app-token@v3
+    id: app-token
+    with:
+      client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
+      private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+      repositories: ${{ github.event.repository.name }}
+      permission-contents: read
+      permission-issues: write
+      permission-pull-requests: write
+  - uses: lklimek/claudius-review-action@v3
+    with:
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      github_token: ${{ steps.app-token.outputs.token }}
+```
+
+App setup: repository permissions **Contents: Read-only** (no push),
+**Issues: Read & write**, **Pull requests: Read & write**; webhook disabled;
+installed on the target repository.
+
+The action deliberately takes a token, not the App's private key: the key can
+mint tokens for every installation of the App until rotated, so it should only
+ever reach `actions/create-github-app-token`, never third-party action code.
+Installation tokens expire after 1 hour — keep the job's `timeout-minutes`
+below that, or posting at the end of a long review will fail.
 
 ## Claude Code Environment Variables
 

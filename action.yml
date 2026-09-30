@@ -23,7 +23,7 @@ inputs:
     required: false
     default: ""
   github_token:
-    description: "GitHub token for API/CLI"
+    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see README's 'Posting as a GitHub App') to post as <app>[bot]."
     required: false
     default: ${{ github.token }}
   allowed_non_write_users:
@@ -551,11 +551,12 @@ runs:
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Find the last review the review bot posted on this head commit
-        # (claude[bot] with the Claude GitHub App token, github-actions[bot] with
-        # GITHUB_TOKEN); none → fall back to a PR comment, never an older review.
+        # Find the last review posted on this head commit during this run (same
+        # filter as the verify step, so any identity github_token authenticates
+        # as matches — github-actions[bot], a GitHub App bot, a machine user);
+        # none → fall back to a PR comment, never an older review.
         REVIEW_ID=$(gh api --paginate "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-          --jq ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"github-actions[bot]\") and .commit_id == \"${HEAD_SHA}\") | .id" | tail -n1)
+          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tail -n1)
         BODY=""
         if [ -n "$REVIEW_ID" ]; then
           BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
@@ -577,6 +578,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
 
     - name: Remove trigger label
       if: inputs.remove_label_on_success == 'true' && success()
