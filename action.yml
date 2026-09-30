@@ -551,30 +551,27 @@ runs:
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Find the last review posted on this head commit during this run (same
-        # filter as the verify step, so any identity github_token authenticates
-        # as matches — github-actions[bot], a GitHub App bot, a machine user);
-        # none → fall back to a PR comment, never an older review.
-        REVIEW_ID=$(gh api --paginate "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tail -n1)
-        BODY=""
-        if [ -n "$REVIEW_ID" ]; then
-          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
-        fi
-        if [ -n "$REVIEW_ID" ] && [ -n "$BODY" ]; then
+        # Candidates: reviews on this head commit submitted during this run, not
+        # by the PR author (same filter as the verify step, so any github_token
+        # identity matches). The filter can't tell whose review it is, so try
+        # newest first and keep the first one this token can edit — a concurrent
+        # human review fails the PUT and is skipped. Reviews with an empty body
+        # are skipped too: GitHub rejects editing them (422 "Could not edit a
+        # review with a missing body"). Nothing edited → post a PR comment.
+        CANDIDATES=$(gh api --paginate "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tac)
+        for REVIEW_ID in $CANDIDATES; do
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty') || continue
+          [ -n "$BODY" ] || continue
           CLEAN_BODY=$(echo "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
           UPDATED="${CLEAN_BODY}
         ${REPORT_LINE}"
-          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
-            -X PUT -f body="$UPDATED"
-        else
-          # Fallback: post as a regular comment if no Claude review found, or if the
-          # found review has an empty body — GitHub's review-update API rejects PUTs
-          # against a review whose original body is empty/missing (422 "Could not
-          # edit a review with a missing body"), which happens whenever a review was
-          # submitted with only inline comments and no summary text.
-          gh pr comment "$PR_NUMBER" --body "$REPORT_LINE"
-        fi
+          if gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
+            -X PUT -f body="$UPDATED" >/dev/null 2>&1; then
+            exit 0
+          fi
+        done
+        gh pr comment "$PR_NUMBER" --body "$REPORT_LINE"
       env:
         GH_TOKEN: ${{ inputs.github_token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
