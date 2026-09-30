@@ -90,6 +90,18 @@ STRUCTURED_OUTPUT='{"heart_comment_ids":[1,2,3,4,5,6,7,8]}' bash "$SHARED/add-he
 check "capped at 5" "$(posted)" "1,2,3,4,5"
 check "bad repo rejected" "$(STRUCTURED_OUTPUT='{}' bash "$SHARED/add-heart-reactions.sh" 'o/r x' "$out" >/dev/null 2>&1; echo $?)" 1
 
+# --- gather-review-data.sh: merged PR with no reviews or threads at all ---
+FX_SAVED="$FX"; export FX="$tmp/fx-empty"
+mkdir -p "$FX" && : > "$FX/calls.log"
+cp "$FX_SAVED/pr.json" "$FX/pr.json"
+echo '[]' > "$FX/reviews.json"
+jq '.data.repository.pullRequest.reviewThreads.nodes = []' "$FX_SAVED/graphql.json" > "$FX/graphql.json"
+empty_out="$tmp/empty.json"
+check "empty PR: gather exits 0" "$(bash "$SHARED/gather-review-data.sh" o/r 19 "$empty_out" >/dev/null 2>&1; echo $?)" 0
+check "empty PR: no threads" "$(jq -c '.threads' "$empty_out")" '[]'
+check "empty PR: zero Claudius reviews/threads" "$(jq -c '[.stats.claudius_reviews, .stats.claudius_threads]' "$empty_out")" '[0,0]'
+export FX="$FX_SAVED"
+
 # --- Validate authentication: github_token required (both actions) ---
 for act in action.yml learn/action.yml; do
   python3 "$HERE/extract-step.py" "$ROOT/$act" validate-auth inputs.upload_transcripts=false > "$tmp/validate.sh"

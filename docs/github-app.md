@@ -86,8 +86,10 @@ the App exists to replace.
 - **Token reachability in the review job.** The review job needs a checkout,
   and claude-code-action configures git with `github_token`, so a
   prompt-injected review agent could read the App token from the workspace.
-  The tool allowlist raises the bar but is not a sandbox: it includes file
-  `Write` and wildcard Bash patterns for the claudius scripts, and allowed
+  The tool allowlist raises the bar but is not a sandbox: `Read` is not
+  scoped to the workspace (it reaches `$HOME` and anything else the runner
+  user can read), and it includes file `Write` and wildcard Bash patterns for
+  the claudius scripts, and allowed
   `gh pr comment` / review-posting commands are a publish channel. A leaked
   App token works for anyone until it expires (at most 1 hour, or when the job
   ends and `create-github-app-token` revokes it) with the App's permissions —
