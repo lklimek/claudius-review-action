@@ -28,8 +28,10 @@ jobs:
     #     (github.event.action == 'review_requested' && github.event.requested_reviewer.login == 'Claudius-Maginificent') ||
     #     (github.event.action == 'synchronize' && contains(github.event.pull_request.requested_reviewers.*.login, 'Claudius-Maginificent'))
     #   )
+    # Job-level, so events skipped by `if:` (e.g. an unrelated label) never
+    # cancel a running review; a new push to a reviewed PR supersedes it.
     concurrency:
-      group: claudius-review-${{ github.event.pull_request.number }}
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 45  # keep <= 60 when using a GitHub App token

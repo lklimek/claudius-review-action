@@ -7,10 +7,6 @@ name: Claudius Self-Review
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
     # Fork and Dependabot PRs get no repo secrets on pull_request, so skip them
@@ -19,6 +15,9 @@ jobs:
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]'
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

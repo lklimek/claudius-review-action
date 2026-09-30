@@ -19,6 +19,11 @@ jobs:
         (github.event.action == 'labeled' && github.event.label.name == 'claudius-review') ||
         (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'claudius-review'))
       )
+    # Job-level, so events skipped by `if:` (e.g. an unrelated label) never
+    # cancel a running review; a new push to a reviewed PR supersedes it.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

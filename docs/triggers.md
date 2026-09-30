@@ -36,10 +36,6 @@ on:
   pull_request:
     types: [review_requested, synchronize]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   review:
     if: >
@@ -48,6 +44,11 @@ jobs:
         (github.event.action == 'review_requested' && github.event.requested_reviewer.login == 'Claudius-Maginificent') ||
         (github.event.action == 'synchronize' && contains(github.event.pull_request.requested_reviewers.*.login, 'Claudius-Maginificent'))
       )
+    # Job-level, so events skipped by `if:` (e.g. an unrelated label) never
+    # cancel a running review; a new push to a reviewed PR supersedes it.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
