@@ -21,9 +21,8 @@ inputs:
     description: "MemCan API key for server authentication"
     required: true
   github_token:
-    description: "GitHub token for API/CLI"
-    required: false
-    default: ${{ github.token }}
+    description: "Installation access token of the GitHub App (minted in the caller workflow by actions/create-github-app-token; needs pull-requests: write for reactions) — see docs/learn.md. Required: an empty value fails the job at the first step; there is no fallback to github.token."
+    required: true
   project_name:
     description: "MemCan project scope (defaults to repo name)"
     required: false
@@ -61,10 +60,20 @@ runs:
     - name: Validate authentication
       shell: bash
       run: |
-        if [ -z "${{ inputs.anthropic_api_key }}" ] && [ -z "${{ inputs.claude_code_oauth_token }}" ]; then
+        if [ -z "$ANTHROPIC_API_KEY_IN" ] && [ -z "$CLAUDE_OAUTH_TOKEN_IN" ]; then
           echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
           exit 1
         fi
+        if [ -z "$GITHUB_TOKEN_IN" ]; then
+          echo "::error::github_token is empty. Pass the GitHub App installation token, i.e. the 'token' output of the actions/create-github-app-token step, and check that step ran and its id matches the reference (see docs/learn.md)."
+          exit 1
+        fi
+      env:
+        # Secrets go through env, never ${{ }} in the script body (which would
+        # write them in cleartext into the step's temp script file).
+        ANTHROPIC_API_KEY_IN: ${{ inputs.anthropic_api_key }}
+        CLAUDE_OAUTH_TOKEN_IN: ${{ inputs.claude_code_oauth_token }}
+        GITHUB_TOKEN_IN: ${{ inputs.github_token }}
 
     - name: Check preconditions and gather review data
       id: gather

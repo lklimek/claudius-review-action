@@ -61,14 +61,12 @@ with different permissions.
 - **Token step fails** (variable or secret unset, App not installed on the
   repository, a requested permission not granted to the App): the job stops at
   that step and the review never starts.
-- **Empty `github_token`**: an explicitly passed input always replaces the
-  input's default, even when it evaluates to an empty string. That happens
-  when `github_token` references a step that was skipped by an `if:`, removed,
-  or misspelled (step id or output name). The action then has no GitHub
-  credentials at all: the write-access preflight cannot read the actor's
-  permission and fails with `permission: unknown`, and `claude-code-action`
-  cannot mint a token of its own without `id-token: write`. Check the step id
-  and `outputs.token` spelling.
+- **Empty or missing `github_token`**: the input is required and has no
+  default. An explicitly passed input always wins, even when it evaluates to an
+  empty string — e.g. it references a step that was skipped by an `if:`,
+  removed, or misspelled (step id or output name). The action's first step
+  then fails with "github_token is empty"; check the step id and
+  `outputs.token` spelling.
 
 Do not paper over this with `|| github.token`: the job token has only
 `contents: read`, so it cannot post a review anyway, and widening the job's
