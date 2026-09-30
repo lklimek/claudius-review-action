@@ -58,8 +58,9 @@ At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provide
 
 - Workflow must trigger on `pull_request: [closed]`
 - Job condition should check `github.event.pull_request.merged == true`
-- Job `permissions: {}`: learn needs no checkout, and all GitHub access (reading the PR, reviews and threads; heart reactions) goes through `github_token`
+- Job `permissions: {}`: learn does no checkout, and all GitHub access (reading the PR, reviews and threads; heart reactions) goes through `github_token`
 - App token: `permission-pull-requests: write` only (`write` for heart reactions, added by a step after the agent, not by the agent itself)
+- No `actions/checkout` (or any other git checkout in the workspace): the action fails if it finds a `.git`
 
 ## Which reviews count
 
@@ -78,7 +79,7 @@ The agent writes persistent memory, so its input is filtered before it runs:
 
 - **PR title and body** — not passed to the agent; it sees the PR number and author login only.
 - **Thread comments** — only comments with a trusted origin (bot, or `OWNER`/`MEMBER`/`COLLABORATOR`) are kept. A thread whose first comment is from anyone else is dropped whole; other untrusted replies are dropped individually and counted in the thread's `withheld_responses`, and the agent never classifies such a thread as ignored. Replies by outside contributors (including the PR author, when not a collaborator) are therefore never learned from, even when genuine.
-- **Tools** — the agent reads the gathered data file (`/tmp/claudius-learn-*`) and uses MemCan search/add. Bash, WebFetch, WebSearch and claude-code-action's GitHub MCP servers (`mcp__github*`) are denied, so it has no shell, web or GitHub tools. Outside the job's working directory it can read only the data file. claude-code-action still places `github_token` in the agent's process environment (unreadable without a shell) and, when the workspace is a git checkout, in its git config (readable) — so run the learn job without a checkout.
+- **Tools** — the agent reads the gathered data file (`/tmp/claudius-learn-*`) and uses MemCan search/add. Bash, WebFetch, WebSearch and claude-code-action's GitHub MCP servers (`mcp__github*`) are denied, so it has no shell, web or GitHub tools. Outside the job's working directory it can read only the data file. claude-code-action still places `github_token` in the agent's process environment (unreadable without a shell) and, in a git checkout, in its git config (readable) — so the action fails before the agent runs when the workspace contains a `.git`; keep `actions/checkout` out of the learn job.
 - **Heart reactions** — added by a later step, only to comments in the data file by `OWNER`/`MEMBER`/`COLLABORATOR` users, at most 5 per PR.
 
 Not protected:

@@ -75,6 +75,18 @@ runs:
         CLAUDE_OAUTH_TOKEN_IN: ${{ inputs.claude_code_oauth_token }}
         GITHUB_TOKEN_IN: ${{ inputs.github_token }}
 
+    - name: Require a workspace without a git checkout
+      id: no-checkout
+      shell: bash
+      run: |
+        # claude-code-action writes the token into a checkout's git config, and
+        # actions/checkout persists its own there; the agent can read the workspace.
+        found=$(find "$GITHUB_WORKSPACE" -name .git -print -quit)
+        if [ -n "$found" ]; then
+          echo "::error::The learn action must run in a job without a git checkout (found ${found}): the agent can read the workspace, and a checkout's git config holds a GitHub token. Remove actions/checkout from the learn job."
+          exit 1
+        fi
+
     - name: Check preconditions and gather review data
       id: gather
       shell: bash
