@@ -24,10 +24,8 @@ learn/
     gather-review-data.sh
 examples/
   minimal.yml           # Minimal workflow
-  extended.yml          # Extended workflow with all options
-  review-request.yml    # Trigger via review request instead of a label
-  combined.yml          # Review + learn in one file
-  learn.yml             # Standalone learn workflow
+  full.yml              # Every input + review-request trigger + learn job
+docs/                   # Detailed docs linked from README: triggers, configuration, github-app, how-it-works, learn
 README.md
 ```
 

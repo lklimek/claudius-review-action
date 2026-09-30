@@ -23,7 +23,7 @@ inputs:
     required: false
     default: ""
   github_token:
-    description: "GitHub token for API/CLI"
+    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see docs/github-app.md) to post as <app>[bot]."
     required: false
     default: ${{ github.token }}
   allowed_non_write_users:
@@ -63,7 +63,7 @@ inputs:
     required: false
     default: "true"
   reviewer_login:
-    description: "GitHub login requested as reviewer to clear from pending review requests on success — set this when triggering via review_requested (see README's 'Triggering by Review Request'). The review itself is posted under whichever GitHub identity github_token authenticates as, not this account, so GitHub never auto-clears this account's own pending request; leave empty (default) to skip this step, e.g. when only using the label trigger."
+    description: "GitHub login requested as reviewer to clear from pending review requests on success — set this when triggering via review_requested (see docs/triggers.md). The review itself is posted under whichever GitHub identity github_token authenticates as, not this account, so GitHub never auto-clears this account's own pending request; leave empty (default) to skip this step, e.g. when only using the label trigger."
     required: false
     default: ""
   remove_review_request_on_success:
@@ -351,7 +351,7 @@ runs:
     - name: Pre-compute PR diff
       shell: bash
       run: |
-        # Consumed by "Verify review report was produced" (review posted this run).
+        # Consumed by "List reviews posted this run".
         echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
         # Reviewers read pr.diff once instead of re-running per-file git diff.
         S="${{ runner.temp }}/claudius-review"
@@ -517,6 +517,21 @@ runs:
         overwrite: true
         if-no-files-found: ignore
 
+    - name: List reviews posted this run
+      id: posted
+      if: '!cancelled()'
+      shell: bash
+      run: |
+        # Reviews on this head commit submitted during this run, not by the PR
+        # author — matches any github_token identity. Newest first.
+        IDS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tac | xargs)
+        echo "ids=${IDS}" >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+
     - name: Verify review report was produced
       if: '!cancelled()'
       shell: bash
@@ -531,17 +546,19 @@ runs:
         fi
         # A report alone is not enough: post_pr_review.py must have posted a
         # review on this head commit during this run (not one by the PR author).
-        POSTED=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-          --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\") | .id" | tail -n1)
-        if [ -z "$POSTED" ]; then
+        if [ "$LIST_OUTCOME" != "success" ]; then
+          echo "::error::Could not list the PR's reviews to confirm one was posted (see 'List reviews posted this run')."
+          exit 1
+        fi
+        if [ -z "$POSTED_IDS" ]; then
           echo "::error::report.json exists but no review was posted on ${HEAD_SHA} during this run —" \
             "post_pr_review.py failed or was never called. The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
           exit 1
         fi
       env:
-        GH_TOKEN: ${{ inputs.github_token }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        LIST_OUTCOME: ${{ steps.posted.outcome }}
+        POSTED_IDS: ${{ steps.posted.outputs.ids }}
 
     - name: Append report link to last Claude review
       # !cancelled(): the link matters most when the verify step above failed.
@@ -551,32 +568,27 @@ runs:
         PR_NUMBER="${{ github.event.pull_request.number }}"
         ARTIFACT_URL="${{ steps.upload-report.outputs.artifact-url }}"
         REPORT_LINE="📊 **[View full HTML review report](${ARTIFACT_URL})**"
-        # Find the last review the review bot posted on this head commit
-        # (claude[bot] with the Claude GitHub App token, github-actions[bot] with
-        # GITHUB_TOKEN); none → fall back to a PR comment, never an older review.
-        REVIEW_ID=$(gh api --paginate "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
-          --jq ".[] | select((.user.login == \"claude[bot]\" or .user.login == \"github-actions[bot]\") and .commit_id == \"${HEAD_SHA}\") | .id" | tail -n1)
-        BODY=""
-        if [ -n "$REVIEW_ID" ]; then
-          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty')
-        fi
-        if [ -n "$REVIEW_ID" ] && [ -n "$BODY" ]; then
-          CLEAN_BODY=$(echo "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
+        # Candidates (newest first) come from 'List reviews posted this run'. The
+        # filter can't tell whose review it is, so keep the first one this token
+        # can edit — a concurrent human review fails the PUT and is skipped.
+        # Reviews with an empty body are skipped too: GitHub rejects editing them
+        # (422 "Could not edit a review with a missing body"). Nothing edited →
+        # post a PR comment.
+        for REVIEW_ID in $CANDIDATES; do
+          BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" --jq '.body // empty') || continue
+          [ -n "$BODY" ] || continue
+          CLEAN_BODY=$(printf '%s\n' "$BODY" | sed '/^📊 \*\*\[View full HTML review report\]/d')
           UPDATED="${CLEAN_BODY}
         ${REPORT_LINE}"
-          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
-            -X PUT -f body="$UPDATED"
-        else
-          # Fallback: post as a regular comment if no Claude review found, or if the
-          # found review has an empty body — GitHub's review-update API rejects PUTs
-          # against a review whose original body is empty/missing (422 "Could not
-          # edit a review with a missing body"), which happens whenever a review was
-          # submitted with only inline comments and no summary text.
-          gh pr comment "$PR_NUMBER" --body "$REPORT_LINE"
-        fi
+          if gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews/${REVIEW_ID}" \
+            -X PUT -f body="$UPDATED" >/dev/null 2>&1; then
+            exit 0
+          fi
+        done
+        gh pr comment "$PR_NUMBER" --body "$REPORT_LINE"
       env:
         GH_TOKEN: ${{ inputs.github_token }}
-        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        CANDIDATES: ${{ steps.posted.outputs.ids }}
 
     - name: Remove trigger label
       if: inputs.remove_label_on_success == 'true' && success()
