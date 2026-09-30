@@ -27,8 +27,10 @@ Use a comma-separated list for multiple accounts, or `*` to allow any actor
 
 ## Triggering by review request
 
-Instead of a label, you can trigger a review by requesting the bot account
-as a PR reviewer:
+Instead of a label, you can trigger a review by requesting a dedicated user
+account (e.g. a machine user) as a PR reviewer. GitHub Apps cannot be
+requested as reviewers, so this account is separate from the App the review
+is posted as:
 
 ```yaml
 name: Claudius Review
@@ -53,12 +55,20 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      issues: write
-      pull-requests: write
     steps:
-      - uses: lklimek/claudius-review-action@v3
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
+      - uses: lklimek/claudius-review-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
           remove_label_on_success: false
           reviewer_login: Claudius-Maginificent
 ```
@@ -68,8 +78,8 @@ the `synchronize` branch re-triggers on new pushes as long as that request is
 still pending. Set `remove_label_on_success: false` since there's no trigger
 label in this mode — but set `reviewer_login` to the same account named in
 the `if:` condition above, or the pending request never clears: the review
-itself is posted under whichever GitHub identity `github_token` authenticates
-as, not under `reviewer_login`, so GitHub does **not** auto-clear that
+itself is posted as the App (`<app-slug>[bot]`), not as `reviewer_login`, so
+GitHub does **not** auto-clear that
 account's own pending review request the way it would if it had reviewed
 itself. Without `reviewer_login` set, the request stays forever and every
 subsequent push re-triggers a full review. To get a fresh review later, just

@@ -35,10 +35,8 @@ it posted: on the head commit, submitted during this run, not by the PR
 author, containing claudius's attribution footer, and authored by a bot or a
 repo collaborator/org member (`author_association` OWNER/MEMBER/COLLABORATOR;
 footer and origin rule: [`lib/claudius.jq`](../lib/claudius.jq)).
-The last check stops an outsider pasting the footer from counting. A machine
-user posting via `github_token` must therefore be a repository collaborator
-(any role, e.g. triage) or org member — otherwise the job fails with "no
-Claudius review was posted" even though the review is visible. The report
+The last check stops an outsider pasting the footer from counting; the
+GitHub App the review is posted as is a bot, so it always passes. The report
 link is appended to the newest matching review.
 
 This repository reviews its own non-draft PRs with the PR's version of the
