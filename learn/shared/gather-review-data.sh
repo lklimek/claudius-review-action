@@ -63,6 +63,8 @@ reviews_json=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr_number}/revi
 
 # Fetch review threads via GraphQL (includes resolution status and all comments)
 echo "Fetching review threads via GraphQL..."
+# $owner etc. in the query are GraphQL variables, not shell expansions.
+# shellcheck disable=SC2016
 threads_json=$(gh api graphql \
   -F owner="$owner" \
   -F repo="$repo" \

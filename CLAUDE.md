@@ -14,6 +14,8 @@ Published at: `lklimek/claudius-review-action`
 action.yml              # Main composite action (PR review)
 lib/
   claudius.jq           # Claudius footer + trusted-origin rule (review and learn)
+tests/
+  run.sh                # Offline tests (fake gh in tests/bin): lib, learn scripts, action steps
 claude/
   skills/ci-pr-review/  # Review flow instructions (installed into ~/.claude/skills)
   agents/               # Coordinator agent (installed into ~/.claude/agents; __MODEL__ templated)
@@ -68,7 +70,7 @@ Test the action by referencing it from a workflow in another repo:
 
 Or reference a local path with `act` for local runner testing.
 
-CI (`.github/workflows/`): `validate.yml` checks `action.yml` against the GitHub Action schema and runs actionlint on workflows/examples; `claudius-review.yml` reviews every non-draft PR with the PR's own version of the action (`uses: ./`). Run the same checks locally before pushing (`check-jsonschema`, `actionlint`, the `---` marker check).
+CI (`.github/workflows/`): `validate.yml` checks `action.yml` against the GitHub Action schema and runs actionlint on workflows/examples; `claudius-review.yml` reviews every non-draft PR with the PR's own version of the action (`uses: ./`). Run the same checks locally before pushing (`check-jsonschema`, `actionlint`, the `---` marker check, `shellcheck`, `tests/run.sh`).
 
 Changes take effect when the action ref is updated in caller workflows.
 
