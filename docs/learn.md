@@ -70,13 +70,13 @@ Reviews and threads from other bots (Copilot, CodeRabbit) and humans are kept as
 The agent writes persistent memory, so its input is filtered before it runs:
 
 - **Thread comments** — only comments with a trusted origin (bot, or `OWNER`/`MEMBER`/`COLLABORATOR`) are kept. A thread whose first comment is from anyone else is dropped whole; other untrusted replies are dropped individually and counted in the thread's `withheld_responses`, and the agent never classifies such a thread as ignored. Replies by outside contributors (including the PR author, when not a collaborator) are therefore never learned from, even when genuine.
-- **Tools** — the agent reads the gathered data file (`/tmp/claudius-learn-*`) and uses MemCan search/add. Bash is denied, so it has no shell, no GitHub access and cannot read the environment. Outside the job's working directory it can read only the data file; the learn job needs no checkout, so keep it without one.
+- **Tools** — the agent reads the gathered data file (`/tmp/claudius-learn-*`) and uses MemCan search/add. Bash, WebFetch, WebSearch and claude-code-action's GitHub MCP servers (`mcp__github*`) are denied, so it has no shell, web or GitHub tools. Outside the job's working directory it can read only the data file. claude-code-action still places `github_token` in the agent's process environment (unreadable without a shell) and, when the workspace is a git checkout, in its git config (readable) — so run the learn job without a checkout.
 - **Heart reactions** — added by a later step, only to comments in the data file by `OWNER`/`MEMBER`/`COLLABORATOR` users, at most 5 per PR.
 
 Not protected:
 
 - **Trusted authors** — any collaborator and any bot account (including third-party review bots installed on the repository) can steer learnings, as can untrusted text they quote.
-- **PR title** — included in the agent's prompt as set by the PR author.
+- **PR title** — passed as data in the data file, unfiltered, as set by the PR author.
 - **Existing memories** — MemCan search results are taken at face value.
 
 ## Cost
