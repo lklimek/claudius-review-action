@@ -139,6 +139,9 @@ runs:
              - ACCEPTED: reviewer flagged it, developer fixed it (confirms the rule)
              - REJECTED: reviewer flagged it, developer pushed back, PR merged anyway (possible false positive or team preference)
              - IGNORED: reviewer flagged it, no response, no fix, merged anyway (noise or low-priority)
+             A thread with withheld_responses > 0 had replies from untrusted authors removed:
+             never classify it as IGNORED; classify it only if the remaining comments show
+             ACCEPTED or REJECTED, otherwise skip it.
           4. For patterns worth remembering, check MemCan for duplicates before saving
           5. Save NEW learnings only via add_memory
 

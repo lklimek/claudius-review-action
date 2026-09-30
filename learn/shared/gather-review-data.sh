@@ -126,7 +126,8 @@ processed_threads=$(echo "$thread_nodes" | jq -L "$lib_dir" --argjson max_len "$
               bot: (.author.__typename == "Bot"),
               body: ((.body // "") | if (. | length) > $max_len then .[0:$max_len] + "..." else . end)
             })
-        )
+        ),
+        withheld_responses: (($all | length) - ($comments | length))
       }
     end
   )
