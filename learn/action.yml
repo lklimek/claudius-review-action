@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ${{ github.event.repository.name }}
   min_review_comments:
-    description: "Minimum review comment count to trigger learning"
+    description: "Minimum number of Claudius inline review comments (review threads) to trigger learning"
     required: false
     default: "1"
   plugins:
@@ -62,69 +62,50 @@ runs:
           exit 1
         fi
 
-    - name: Check preconditions
-      id: preconditions
+    - name: Check preconditions and gather review data
+      id: gather
       shell: bash
       run: |
         REPO="${{ github.repository }}"
         PR_NUMBER="${{ github.event.pull_request.number }}"
-
-        # Validate min_review_comments is a positive integer
         MIN_COMMENTS="${{ inputs.min_review_comments }}"
         if ! [[ "$MIN_COMMENTS" =~ ^[0-9]+$ ]]; then
-          echo "::error::min_review_comments must be a positive integer, got: ${MIN_COMMENTS}"
+          echo "::error::min_review_comments must be a non-negative integer, got: ${MIN_COMMENTS}"
           exit 1
         fi
 
-        # Must be a merged PR
         if [ "${{ github.event.pull_request.merged }}" != "true" ]; then
           echo "::notice::PR was closed without merging. Skipping learn."
           echo "skip=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
-        # Must have claude[bot] reviews
-        CLAUDE_REVIEWS=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
-          --jq '[.[] | select(.user.login == "claude[bot]")] | length')
-        if [ "$CLAUDE_REVIEWS" -eq 0 ]; then
-          echo "::notice::No claude[bot] reviews found on PR. Skipping learn."
+        TMPFILE=$(mktemp /tmp/claudius-learn-XXXXXX.json)
+        bash "${{ github.action_path }}/shared/gather-review-data.sh" "$REPO" "$PR_NUMBER" "$TMPFILE"
+
+        # Claudius reviews are recognised by content, not author: any github_token
+        # identity (github-actions[bot], a GitHub App, a machine user) counts.
+        REVIEWS=$(jq '.stats.claudius_reviews' "$TMPFILE")
+        THREADS=$(jq '.stats.claudius_threads' "$TMPFILE")
+        if [ "$REVIEWS" -eq 0 ]; then
+          echo "::notice::No Claudius reviews found on PR. Skipping learn."
           echo "skip=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-
-        # Must have enough review comments
-        COMMENT_COUNT=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" \
-          --jq 'length')
-        if [ "$COMMENT_COUNT" -lt "${{ inputs.min_review_comments }}" ]; then
-          echo "::notice::Only ${COMMENT_COUNT} review comments (min: ${{ inputs.min_review_comments }}). Skipping learn."
+        if [ "$THREADS" -lt "$MIN_COMMENTS" ]; then
+          echo "::notice::Only ${THREADS} Claudius review comments (min: ${MIN_COMMENTS}). Skipping learn."
           echo "skip=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
         echo "skip=false" >> "$GITHUB_OUTPUT"
-        echo "comment_count=${COMMENT_COUNT}" >> "$GITHUB_OUTPUT"
-        echo "Found ${CLAUDE_REVIEWS} claude[bot] reviews and ${COMMENT_COUNT} review comments."
-      env:
-        GH_TOKEN: ${{ inputs.github_token }}
-
-    - name: Gather review data
-      if: steps.preconditions.outputs.skip != 'true'
-      id: gather
-      shell: bash
-      run: |
-        REPO="${{ github.repository }}"
-        PR_NUMBER="${{ github.event.pull_request.number }}"
-        TMPFILE=$(mktemp /tmp/claudius-learn-XXXXXX.json)
-
-        bash "${{ github.action_path }}/shared/gather-review-data.sh" \
-          "$REPO" "$PR_NUMBER" "$TMPFILE"
-
         echo "data_file=${TMPFILE}" >> "$GITHUB_OUTPUT"
+        echo "Found ${REVIEWS} Claudius reviews with ${THREADS} review comments."
       env:
         GH_TOKEN: ${{ inputs.github_token }}
 
     - name: Run Claude learning extraction
-      if: steps.preconditions.outputs.skip != 'true'
+      if: steps.gather.outputs.skip != 'true'
       uses: anthropics/claude-code-action@v1
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
@@ -146,7 +127,7 @@ runs:
           1. Read the review data file at: ${{ steps.gather.outputs.data_file }}
           2. Search existing memories: search_memories(query="code review", project="${{ inputs.project_name }}")
              Also search for topic-specific memories based on the review threads you find.
-          3. Analyze each review thread to classify as:
+          3. Analyze each thread with "claudius": true (threads from other reviewers are context only) to classify as:
              - ACCEPTED: reviewer flagged it, developer fixed it (confirms the rule)
              - REJECTED: reviewer flagged it, developer pushed back, PR merged anyway (possible false positive or team preference)
              - IGNORED: reviewer flagged it, no response, no fix, merged anyway (noise or low-priority)

@@ -40,7 +40,7 @@ See [`examples/full.yml`](../examples/full.yml) for a workflow running both revi
 | `memcan_api_key` | **Yes** | | MemCan API key for server authentication |
 | `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
 | `project_name` | No | `${{ github.event.repository.name }}` | MemCan project scope |
-| `min_review_comments` | No | `1` | Minimum review comments to trigger learning |
+| `min_review_comments` | No | `1` | Minimum Claudius inline review comments (threads) to trigger learning |
 | `plugins` | No | `memcan@lklimek` | Newline-separated plugin list |
 | `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
 | `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
@@ -54,6 +54,15 @@ At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provide
 - Job condition should check `github.event.pull_request.merged == true`
 - `contents: read` and `pull-requests: write` permissions are needed (`write` for heart reactions)
 
+## Which reviews count
+
+Learn recognises Claudius reviews by content, not by author, so it works with any `github_token` identity the review action posted under (`github-actions[bot]`, a GitHub App such as `<app>[bot]`, a machine user). A review counts when its body contains either:
+
+- the claudius attribution footer, `Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius)` (added by claudius >= 8.2.0), or
+- a line starting with the review action's report link, `📊 **[View full HTML review report](`.
+
+Reviews and threads from other bots (Copilot, CodeRabbit) and humans are kept as context but never trigger learning or count towards `min_review_comments`. A thread is a Claudius thread when its first comment belongs to a Claudius review.
+
 ## Cost
 
-The learn action exits early (zero cost) when preconditions are not met (no claude[bot] reviews, not merged, below comment threshold). When it does run, Sonnet or Haiku is recommended -- expect approximately $0.02-0.06 per invocation depending on PR size.
+The learn action exits early (no Claude run) when preconditions are not met (not merged, no Claudius reviews, fewer Claudius review comments than `min_review_comments`). When it does run, Sonnet or Haiku is recommended -- expect approximately $0.02-0.06 per invocation depending on PR size.

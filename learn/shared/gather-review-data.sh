@@ -52,6 +52,14 @@ echo "Fetching PR metadata..."
 pr_json=$(gh api "repos/${owner}/${repo}/pulls/${pr_number}" \
   --jq '{number: .number, title: .title, author: .user.login, merged_at: .merged_at}')
 
+# Claudius reviews, whichever identity posted them: the claudius attribution
+# footer (post_pr_review.py >= 8.2.0) or this action's report-link line.
+echo "Fetching Claudius reviews..."
+reviews_json=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr_number}/reviews" \
+  --jq '.[] | select((.body // "") | contains("Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius)")
+    or test("(^|\n)📊 \\*\\*\\[View full HTML review report\\]\\(")) | {id, user: .user.login}' \
+  | jq -s '.')
+
 # Fetch review threads via GraphQL (includes resolution status and all comments)
 echo "Fetching review threads via GraphQL..."
 threads_json=$(gh api graphql \
@@ -69,11 +77,12 @@ threads_json=$(gh api graphql \
               comments(first: 50) {
                 nodes {
                   databaseId
-                  author { login }
+                  author { login __typename }
                   authorAssociation
                   body
                   path
                   createdAt
+                  pullRequestReview { databaseId }
                 }
               }
             }
@@ -84,7 +93,8 @@ threads_json=$(gh api graphql \
 
 # Process threads into the target structure using jq
 echo "Processing thread data..."
-processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGTH" '
+processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGTH" \
+  --argjson ids "$(echo "$reviews_json" | jq '[.[].id]')" '
   .data.repository.pullRequest.reviewThreads.nodes
   | map(
     . as $thread |
@@ -95,6 +105,7 @@ processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGT
         id: $thread.id,
         file: ($comments[0].path // "unknown"),
         resolved: $thread.isResolved,
+        claudius: ($comments[0].pullRequestReview.databaseId as $rid | any($ids[]; . == $rid)),
         reviewer_comment: {
           comment_id: $comments[0].databaseId,
           user: ($comments[0].author.login // "unknown"),
@@ -107,6 +118,7 @@ processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGT
               comment_id: .databaseId,
               user: (.author.login // "unknown"),
               author_association: (.authorAssociation // "NONE"),
+              bot: (.author.__typename == "Bot"),
               body: ((.body // "") | if (. | length) > $max_len then .[0:$max_len] + "..." else . end)
             })
         )
@@ -117,13 +129,17 @@ processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGT
 
 # Calculate stats
 echo "Calculating stats..."
-stats=$(echo "$processed_threads" | jq '
+# GraphQL logins drop the "[bot]" suffix the REST reviews API returns.
+stats=$(echo "$processed_threads" | jq --argjson reviews "$reviews_json" '
+  ($reviews | map(.user | sub("\\[bot\\]$"; ""))) as $claudius_logins |
   {
     total_threads: length,
     resolved: [.[] | select(.resolved == true)] | length,
     unresolved: [.[] | select(.resolved == false)] | length,
-    claude_threads: [.[] | select(.reviewer_comment.user == "claude[bot]")] | length,
-    human_responses: [.[].responses[] | select(.user != "claude[bot]" and .user != "github-actions[bot]")] | length
+    claudius_reviews: ($reviews | length),
+    claudius_threads: [.[] | select(.claudius)] | length,
+    human_responses: [.[] | select(.claudius) | .responses[]
+      | select((.bot | not) and (.user as $u | $claudius_logins | index($u) | not))] | length
   }
 ')
 
@@ -138,7 +154,7 @@ jq -n \
 echo "::endgroup::"
 
 thread_count=$(echo "$stats" | jq '.total_threads')
-claude_count=$(echo "$stats" | jq '.claude_threads')
+claudius_count=$(echo "$stats" | jq '.claudius_threads')
 human_count=$(echo "$stats" | jq '.human_responses')
-echo "Gathered ${thread_count} threads (${claude_count} from claude[bot], ${human_count} human responses)"
+echo "Gathered ${thread_count} threads (${claudius_count} from Claudius, ${human_count} human responses)"
 echo "Output written to: ${output_file}"
