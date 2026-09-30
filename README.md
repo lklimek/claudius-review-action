@@ -1,6 +1,6 @@
 # Claudius PR Review Action
 
-A reusable GitHub composite action that wraps [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) for AI-powered PR reviews with the Claudius pipeline: it resolves fixed review threads, runs a multi-specialist static review, posts inline findings and approves the PR when nothing unresolved remains. Requires claudius >= 8.2.0 (installed at run time).
+A reusable GitHub composite action that wraps [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) for AI-powered PR reviews with the Claudius pipeline: it checks earlier review threads (listing fixed ones in the review; resolving them needs Contents write, see [GitHub App](docs/github-app.md)), runs a multi-specialist static review, posts inline findings and approves the PR when nothing unresolved remains. Requires claudius >= 8.2.0 (installed at run time).
 
 The action runs under your own GitHub App: the calling workflow mints a short-lived installation token and passes it as `github_token`, so every review, reply and label change is posted as `<app-slug>[bot]`.
 
@@ -11,7 +11,7 @@ The action runs under your own GitHub App: the calling workflow mints a short-li
 Under **Settings → Developer settings → GitHub Apps → New GitHub App** (on your user or organization):
 
 - **Webhook**: untick **Active**.
-- **Repository permissions**: Contents **Read-only**, Issues **Read and write**, Pull requests **Read and write** (Metadata: Read-only is implicit). Nothing else.
+- **Repository permissions**: Contents **Read-only**, Issues **Read and write**, Pull requests **Read and write** (Metadata: Read-only is implicit). Nothing else — this keeps the App without push access, at the cost of not auto-resolving fixed threads (that needs Contents write).
 - Create the App, note its **Client ID** and generate a **private key** (`.pem`).
 - **Install App** on the repositories to review.
 
@@ -74,7 +74,7 @@ jobs:
 
 - **Job `permissions:`**: `contents: read` only. The job's own token is used just to check out the PR; the App token does every GitHub write.
 - **App token**: scoped to the current repository with Contents read, Issues write and Pull requests write.
-- **No `id-token: write`**: `claude-code-action` only needs OIDC to mint a token of its own, which it never does when `github_token` is passed, and the permission would let any step (including the review agent) mint OIDC tokens.
+- **No `id-token: write`**: `claude-code-action` only needs OIDC to mint a token of its own, which it never does when `github_token` is passed, and the permission would let any step (including the review agent) mint OIDC tokens — which, for example, claude-code-action's backend exchanges for a Claude GitHub App token that may carry broader (even push) access, and which cloud roles federated to the repository accept.
 - **No fallback**: a missing or misconfigured App fails the job instead of silently running under another identity. See [Failure modes](docs/github-app.md#failure-modes).
 
 Only actors with write/admin access can trigger a review by default; see [Triggers](docs/triggers.md) for bots and the review-request mode.
