@@ -23,7 +23,7 @@ inputs:
     required: false
     default: ""
   github_token:
-    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see docs/github-app.md) to post as <app>[bot]. The default applies only when the input is omitted: an explicitly passed empty value leaves the action without a token, with no fallback to github.token (use `<expr> || github.token`)."
+    description: "GitHub token for API/CLI. The review is posted as whichever identity this token authenticates as — pass a GitHub App installation token (see docs/github-app.md) to post as <app>[bot]. The default applies only when the input is omitted: an explicitly passed empty value leaves the action without a token, with no fallback to github.token — a missing App token fails the job by design."
     required: false
     default: ${{ github.token }}
   allowed_non_write_users:
