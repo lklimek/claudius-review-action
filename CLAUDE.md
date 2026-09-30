@@ -57,6 +57,7 @@ When improving this action's performance, apply these criteria in priority order
 - `anthropics/claude-code-action@v1` is the execution engine; this repo only provides the prompt, inputs, and pre/post steps
 - Plugin-based architecture: claudius, claudash, memcan — loaded via `plugins` input
 - Auth: dual-mode — either `anthropic_api_key` or `claude_code_oauth_token` must be provided
+- GitHub identity: a GitHub App installation token minted by the caller (`actions/create-github-app-token`) is the only supported setup; `github_token` is required, no `GITHUB_TOKEN` fallback, job `permissions:` is `contents: read` (review) / `{}` (learn), never `id-token: write`
 - Claude Code behavior (effort, max turns) is controlled via env vars set in the caller's workflow; the coordinator model is the `model` input (templated into the bundled agent), reviewer models come from `claudius:grumpy-review`
 - `learn/` is WIP — the interface is unstable, do not treat it as production-ready
 
@@ -70,13 +71,13 @@ Test the action by referencing it from a workflow in another repo:
 
 Or reference a local path with `act` for local runner testing.
 
-CI (`.github/workflows/`): `validate.yml` checks `action.yml` against the GitHub Action schema and runs actionlint on workflows/examples; `claudius-review.yml` reviews every non-draft PR with the PR's own version of the action (`uses: ./`). Run the same checks locally before pushing (`check-jsonschema`, `actionlint`, the `---` marker check, `shellcheck`, `tests/run.sh`).
+CI (`.github/workflows/`): `validate.yml` checks `action.yml` and `learn/action.yml` against the GitHub Action schema, runs actionlint on workflows/examples, the `---` marker check, shellcheck, a jq smoke check of `lib/claudius.jq` and `tests/run.sh`; `claudius-review.yml` reviews every non-draft PR with the PR's own version of the action (`uses: ./`). Run the same checks locally before pushing (`check-jsonschema`, `actionlint`, the `---` marker check, `shellcheck`, `tests/run.sh`).
 
 Changes take effect when the action ref is updated in caller workflows.
 
 ## Versioning
 
-Tag releases as `vX.Y.Z` following [SemVer 2](https://semver.org/), and move the major alias tag (`vX`, e.g. `v2`) to the same commit — README and examples reference the major alias. A major release creates a new alias (`v3`) and leaves the old one frozen; update README and examples to the new alias in the same release. The `learn` sub-action is versioned together with the root action.
+No release has been tagged yet; the first is **v1.0.0** with alias `v1`, which docs and examples already reference. Tag releases as `vX.Y.Z` following [SemVer 2](https://semver.org/), and move the major alias tag (`vX`, e.g. `v2`) to the same commit — README and examples reference the major alias. A major release creates a new alias (`v3`) and leaves the old one frozen; update README and examples to the new alias in the same release. The `learn` sub-action is versioned together with the root action.
 
 - **Major**: breaking input/output changes, removed inputs, changed review flow behavior
 - **Minor**: new inputs (with defaults), new post-processing steps, new features

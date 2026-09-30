@@ -90,4 +90,12 @@ STRUCTURED_OUTPUT='{"heart_comment_ids":[1,2,3,4,5,6,7,8]}' bash "$SHARED/add-he
 check "capped at 5" "$(posted)" "1,2,3,4,5"
 check "bad repo rejected" "$(STRUCTURED_OUTPUT='{}' bash "$SHARED/add-heart-reactions.sh" 'o/r x' "$out" >/dev/null 2>&1; echo $?)" 1
 
+# --- Validate authentication: github_token required (both actions) ---
+for act in action.yml learn/action.yml; do
+  python3 "$HERE/extract-step.py" "$ROOT/$act" validate-auth inputs.upload_transcripts=false > "$tmp/validate.sh"
+  validate() { env -i PATH="$PATH" CLAUDE_OAUTH_TOKEN_IN=x GITHUB_TOKEN_IN="$1" bash -eo pipefail "$tmp/validate.sh" >/dev/null 2>&1; echo "rc=$?"; }
+  check "$act validate: token set passes" "$(validate ghs_abc)" "rc=0"
+  check "$act validate: empty token fails" "$(validate '')" "rc=1"
+  check "$act validate: whitespace-only token fails" "$(validate $' \n\t')" "rc=1"
+done
 exit "$fail"

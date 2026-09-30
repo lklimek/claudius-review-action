@@ -83,6 +83,14 @@ the App exists to replace.
   `create-github-app-token` revokes them when the job ends). Mint the token in
   the job's first step and keep `timeout-minutes` at 60 or less, so the job
   always ends before the token does.
+- **Token reachability in the review job.** The review job needs a checkout,
+  and claude-code-action configures git with `github_token`, so a
+  prompt-injected review agent could read the App token from the workspace.
+  It grants nothing beyond what the agent already exercises through its
+  allowed `gh pr` commands and claudius scripts (the App's narrow permissions,
+  no push), expires within the hour, and the agent has no network tools to
+  send it elsewhere. The learn job, which needs no checkout, refuses one
+  instead.
 - **Resolving threads** (`resolveReviewThread`) requires **Contents: Read and
   write**, so it is refused for a read-only App. The review then lists
   fixed-but-unresolved threads in its body instead; granting Contents write to

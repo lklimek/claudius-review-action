@@ -144,13 +144,16 @@ runs:
   using: composite
   steps:
     - name: Validate authentication
+      id: validate-auth
       shell: bash
       run: |
         if [ -z "$ANTHROPIC_API_KEY_IN" ] && [ -z "$CLAUDE_OAUTH_TOKEN_IN" ]; then
           echo "::error::Either 'anthropic_api_key' or 'claude_code_oauth_token' must be provided."
           exit 1
         fi
-        if [ -z "$GITHUB_TOKEN_IN" ]; then
+        # Whitespace-only counts as empty (e.g. a stray newline from a
+        # misconfigured secret or expression).
+        if [ -z "$(printf '%s' "$GITHUB_TOKEN_IN" | tr -d '[:space:]')" ]; then
           echo "::error::github_token is empty. Pass the GitHub App installation token, i.e. the 'token' output of the actions/create-github-app-token step, and check that step ran and its id matches the reference (see docs/github-app.md)."
           exit 1
         fi

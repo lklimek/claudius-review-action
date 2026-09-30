@@ -64,7 +64,7 @@ At least one of `anthropic_api_key` or `claude_code_oauth_token` must be provide
 
 ## Which reviews count
 
-Learn recognizes reviews posted by the review action's GitHub App (`<app-slug>[bot]`). A review counts when both hold:
+Learn recognizes Claudius reviews — normally the ones the review action posts as its GitHub App (`<app-slug>[bot]`). A review counts when both hold (so any bot or privileged collaborator whose review carries a marker counts too):
 
 1. **Content** — its body contains either:
    - the claudius attribution footer that `post_pr_review.py` (claudius >= 8.2.0) appends, defined in [`lib/claudius.jq`](../lib/claudius.jq), or
