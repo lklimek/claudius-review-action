@@ -51,7 +51,7 @@ echo "::group::Gathering review data for ${owner_repo}#${pr_number}"
 # Fetch PR metadata
 echo "Fetching PR metadata..."
 pr_json=$(gh api "repos/${owner}/${repo}/pulls/${pr_number}" \
-  --jq '{number: .number, title: .title, author: .user.login, merged_at: .merged_at}')
+  --jq '{number: .number, author: .user.login, merged_at: .merged_at}')
 
 # Claudius reviews: a claudius marker in the body (attribution footer or this
 # action's report-link line) AND a trusted origin (see lib/claudius.jq).
@@ -63,6 +63,8 @@ reviews_json=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr_number}/revi
 
 # Fetch review threads via GraphQL (includes resolution status and all comments)
 echo "Fetching review threads via GraphQL..."
+# $owner etc. in the query are GraphQL variables, not shell expansions.
+# shellcheck disable=SC2016
 threads_json=$(gh api graphql \
   -F owner="$owner" \
   -F repo="$repo" \

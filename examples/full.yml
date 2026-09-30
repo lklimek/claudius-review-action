@@ -1,7 +1,8 @@
 ---
 # Every input of the action, plus the review-request trigger and the learn
-# action. Delete what you do not need; every input except one credential is optional.
-# Details: docs/configuration.md, docs/triggers.md, docs/github-app.md, docs/learn.md
+# action. Delete what you do not need: only one Claude credential and
+# github_token (the GitHub App token, docs/github-app.md) are required.
+# Details: docs/configuration.md, docs/triggers.md, docs/learn.md
 name: Claudius Review (full)
 
 "on":
@@ -34,20 +35,17 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # keep <= 60 when using a GitHub App token
+    timeout-minutes: 45  # keep <= 60: the App token expires after 1 hour
     permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-      id-token: write
+      contents: read  # checkout only; the App token does all GitHub writes
     # Claude Code behaviour is tuned via env vars (docs/configuration.md).
     env:
       CLAUDE_CODE_MAX_TURNS: "200"
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
-      # Optional: post as your own GitHub App (<slug>[bot]). Mint the token first.
-      # An empty `github_token` is passed as-is, not replaced by the default —
-      # hence the `|| github.token` fallback below.
+      # GitHub App token the review is posted with (docs/github-app.md).
+      # First step, so the token outlives the job. No `|| github.token`
+      # fallback: a broken App setup must fail the job.
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:
@@ -58,13 +56,13 @@ jobs:
           permission-issues: write
           permission-pull-requests: write
 
-      - uses: lklimek/claudius-review-action@v3
+      - uses: lklimek/claudius-review-action@v1
         with:
           # Credentials: at least one of the two.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Identity the review is posted as.
-          github_token: ${{ steps.app-token.outputs.token || github.token }}
+          # App installation token: the review is posted as <app-slug>[bot].
+          github_token: ${{ steps.app-token.outputs.token }}
           allowed_non_write_users: my-triage-bot
           # MemCan (optional, search-only in CI).
           memcan_url: ${{ secrets.MEMCAN_URL }}
@@ -109,15 +107,24 @@ jobs:
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
-      pull-requests: write
+    # No checkout; the App token does all GitHub access.
+    permissions: {}
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
-      - uses: lklimek/claudius-review-action/learn@v3
+      # Learn reads PR data and adds heart reactions: pull requests only.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.REVIEW_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
+      - uses: lklimek/claudius-review-action/learn@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ steps.app-token.outputs.token }}
           # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           memcan_url: ${{ secrets.MEMCAN_URL }}
           memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
