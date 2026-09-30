@@ -95,16 +95,21 @@ threads_json=$(gh api graphql \
       }
     }')
 
-# Process threads into the target structure using jq
+# Only comments from bots or repo owners/members/collaborators reach the
+# memory-writing agent: a thread with an untrusted first comment is dropped
+# whole, untrusted replies individually.
 echo "Processing thread data..."
-processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGTH" \
-  --argjson ids "$(echo "$reviews_json" | jq '[.[].id]')" '
-  .data.repository.pullRequest.reviewThreads.nodes
-  | map(
+thread_nodes=$(echo "$threads_json" | jq '.data.repository.pullRequest.reviewThreads.nodes')
+trusted_filter='def trusted: .author.__typename == "Bot" or ((.authorAssociation // "NONE") | IN("OWNER", "MEMBER", "COLLABORATOR"));'
+untrusted_dropped=$(echo "$thread_nodes" | jq "$trusted_filter"'
+  [.[] | (.comments.nodes // []) | if (.[0] | trusted) then map(select(trusted | not)) else . end | length] | add // 0')
+processed_threads=$(echo "$thread_nodes" | jq --argjson max_len "$MAX_BODY_LENGTH" \
+  --argjson ids "$(echo "$reviews_json" | jq '[.[].id]')" "$trusted_filter"'
+  map(
     . as $thread |
-    ($thread.comments.nodes // []) as $comments |
-    if ($comments | length) == 0 then empty
-    else
+    ($thread.comments.nodes // []) as $all |
+    if ($all | length) == 0 or ($all[0] | trusted | not) then empty
+    else ($all | map(select(trusted))) as $comments |
       {
         id: $thread.id,
         file: ($comments[0].path // "unknown"),
@@ -134,7 +139,8 @@ processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGT
 # Calculate stats
 echo "Calculating stats..."
 # GraphQL logins drop the "[bot]" suffix the REST reviews API returns.
-stats=$(echo "$processed_threads" | jq --argjson reviews "$reviews_json" '
+stats=$(echo "$processed_threads" | jq --argjson reviews "$reviews_json" \
+  --argjson untrusted_dropped "$untrusted_dropped" '
   ($reviews | map(.user | sub("\\[bot\\]$"; ""))) as $claudius_logins |
   {
     total_threads: length,
@@ -143,7 +149,8 @@ stats=$(echo "$processed_threads" | jq --argjson reviews "$reviews_json" '
     claudius_reviews: ($reviews | length),
     claudius_threads: [.[] | select(.claudius)] | length,
     human_responses: [.[] | select(.claudius) | .responses[]
-      | select((.bot | not) and (.user as $u | $claudius_logins | index($u) | not))] | length
+      | select((.bot | not) and (.user as $u | $claudius_logins | index($u) | not))] | length,
+    untrusted_comments_dropped: $untrusted_dropped
   }
 ')
 
@@ -160,5 +167,5 @@ echo "::endgroup::"
 thread_count=$(echo "$stats" | jq '.total_threads')
 claudius_count=$(echo "$stats" | jq '.claudius_threads')
 human_count=$(echo "$stats" | jq '.human_responses')
-echo "Gathered ${thread_count} threads (${claudius_count} from Claudius, ${human_count} human responses)"
+echo "Gathered ${thread_count} threads (${claudius_count} from Claudius, ${human_count} human responses; ${untrusted_dropped} untrusted comments dropped)"
 echo "Output written to: ${output_file}"
