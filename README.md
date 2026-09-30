@@ -99,7 +99,7 @@ Outputs: `report_artifact_name`, `transcripts_artifact_name`. Defaults, descript
 
 ## More
 
-- [GitHub App setup](docs/github-app.md): key handling, token lifetime, failure modes, thread resolution
+- [GitHub App setup](docs/github-app.md): key handling, token lifetime, failure modes, thread resolution, **residual risk: token and secrets reachable by a prompt-injected agent — review only trusted authors' PRs**
 - [Triggers](docs/triggers.md): label, review request, non-write actors
 - [Configuration reference](docs/configuration.md): all inputs, outputs, env vars
 - [How it works](docs/how-it-works.md): review flow, tool allowlist, MemCan preflight
