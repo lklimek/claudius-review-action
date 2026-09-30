@@ -17,6 +17,7 @@ claude/
   agents/               # Coordinator agent (installed into ~/.claude/agents; __MODEL__ templated)
 .github/workflows/
   claudius-review.yml   # Self-review of every non-draft PR using `uses: ./`
+  validate.yml          # action.yml schema check + actionlint on workflows/examples
 learn/
   action.yml            # Post-merge learning extraction (WIP — do not touch without asking)
   shared/
@@ -35,9 +36,8 @@ README.md
 The flow lives in the `ci-pr-review` skill (`claude/skills/ci-pr-review/SKILL.md`); the prompt in `action.yml` only invokes it. Keep flow instructions in the skill, not the prompt.
 
 1. `claudius:check-pr-comments` — check and resolve previous review threads
-2. `claudius:grumpy-review` — sequential (`sonnet` first, then `opus`; stops early on the first HIGH+/blocking finding), static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
-3. Post MEDIUM+ findings as inline PR comments via `gh api`
-4. Approve PR if no unresolved issues remain
+2. `claudius:grumpy-review` — all reviewers in parallel, static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
+3. Post the review with claudius `post_pr_review.py` (diff mapping, open-thread dedup; APPROVE when nothing unresolved remains, else COMMENT) — requires claudius ≥ 8.2.0
 
 Steps 1 and 2 MUST use the `Skill` tool — never perform their work manually. GitHub access is `gh` CLI only (claudius no longer ships a GitHub MCP server).
 
@@ -46,7 +46,7 @@ Steps 1 and 2 MUST use the `Skill` tool — never perform their work manually. G
 When improving this action's performance, apply these criteria in priority order. "Without losing review quality" is a hard constraint across all three.
 
 1. **Decrease number of rounds** (highest priority) — minimize conversation turns between Claude and tools. Prefer skills/agents that batch their own operations over multiple sequential tool calls from the orchestrator.
-2. **Decrease running time** (second priority) — reduce wall-clock time of the GitHub Actions job. Avoid redundant checkouts or API calls. Exception: reviewer agents run sequentially on purpose (owner decision) — sonnet first, then opus, stopping at the first HIGH+/blocking finding — trading wall-clock for lower cost: a PR with a serious defect never pays for the remaining reviewers. Do not parallelize them.
+2. **Decrease running time** (second priority) — reduce wall-clock time of the GitHub Actions job. Avoid redundant checkouts or API calls. Reviewer agents run in parallel (all spawned in one round, foreground) — they dominate wall-clock time.
 3. **Decrease number of tokens** (third priority) — reduce token consumption. Trim prompt verbosity, avoid passing large context that is not needed, prefer targeted `gh` calls over broad reads.
 
 ## Conventions
@@ -68,17 +68,13 @@ Test the action by referencing it from a workflow in another repo:
 
 Or reference a local path with `act` for local runner testing.
 
-Validate YAML syntax before pushing:
+CI (`.github/workflows/`): `validate.yml` checks `action.yml` against the GitHub Action schema and runs actionlint on workflows/examples; `claudius-review.yml` reviews every non-draft PR with the PR's own version of the action (`uses: ./`). Run the same checks locally before pushing (`check-jsonschema`, `actionlint`, the `---` marker check).
 
-```bash
-yamllint action.yml learn/action.yml
-```
-
-There is no plugin manifest or CI pipeline in this repo. Changes take effect when the action ref is updated in caller workflows.
+Changes take effect when the action ref is updated in caller workflows.
 
 ## Versioning
 
-Tag releases as `vX.Y.Z` following [SemVer 2](https://semver.org/). The `learn` sub-action is versioned together with the root action.
+Tag releases as `vX.Y.Z` following [SemVer 2](https://semver.org/), and move the major alias tag (`vX`, e.g. `v2`) to the same commit — README and examples reference the major alias. A major release creates a new alias (`v3`) and leaves the old one frozen; update README and examples to the new alias in the same release. The `learn` sub-action is versioned together with the root action.
 
 - **Major**: breaking input/output changes, removed inputs, changed review flow behavior
 - **Minor**: new inputs (with defaults), new post-processing steps, new features

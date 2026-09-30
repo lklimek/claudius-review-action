@@ -30,7 +30,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v2
+      - uses: lklimek/claudius-review-action@v3
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
@@ -66,7 +66,7 @@ jobs:
       CLAUDE_CODE_MAX_TURNS: "200"
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
-      - uses: lklimek/claudius-review-action@v2
+      - uses: lklimek/claudius-review-action@v3
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: sonnet
@@ -119,7 +119,7 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: lklimek/claudius-review-action@v2
+      - uses: lklimek/claudius-review-action@v3
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           remove_label_on_success: false
@@ -158,18 +158,40 @@ Claude to run that skill. The skill:
 
 1. runs `claudius:check-pr-comments` — replies to and resolves threads that
    are already fixed;
-2. runs `claudius:grumpy-review` with CI overrides — reviewers are spawned
-   **one at a time** (`sonnet` reviewers first, then `opus`; the remaining ones
-   are skipped as soon as one reports a HIGH+ or blocking finding), do **static review only** (no builds, tests or
+2. runs `claudius:grumpy-review` with CI overrides — reviewers run **in
+   parallel**, do **static review only** (no builds, tests or
    reproduction attempts; unconfirmed findings are reported, not dropped),
    and a report is **always** written, even when nothing was found;
-3. posts MEDIUM+ findings as inline comments via `gh`, and approves the PR
-   when nothing is left unresolved.
+3. posts the review with claudius's `post_pr_review.py`, which maps findings
+   onto the diff, skips ones already raised in open threads and approves the
+   PR when nothing is left unresolved.
 
+Requires **claudius ≥ 8.2.0** (installed from the marketplace at run time).
 All GitHub access goes through the `gh` CLI (no GitHub MCP server).
+
+**Permissions.** The default `allowed_tools` holds only what the flow needs:
+file tools, read-only `git` and `gh pr` commands, the claudius plugin scripts
+and MemCan search. `gh api`, `env`, `curl` and shells are not on it. This
+raises the bar for prompt injection via PR content but is not a sandbox: file
+tools are not confined to the workspace, so only run reviews on PRs from
+authors you trust with the job's secrets.
+
+**MemCan preflight.** When `memcan_url`/`memcan_api_key` are set, the action
+probes `/health` and an MCP `initialize` (status codes only, session closed
+afterwards) and continues without MemCan if the server isn't usable. It warns
+when the URL is plain HTTP to a non-local host. MemCan is search-only in CI:
+write tools are always denied, since PR content is untrusted.
 
 This repository reviews its own non-draft PRs with the PR's version of the
 action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claudius-review.yml).
+
+## Upgrading from v2
+
+v3 is a breaking release:
+
+- **claudius ≥ 8.2.0 is required** — the review is posted by its `post_pr_review.py`; the job fails with an older plugin.
+- **Narrower default `allowed_tools`** — a static allowlist of what the flow needs; custom review flows relying on other tools must pass their own list.
+- **Changed flow** — reviewers run in parallel, and the job fails when no review was posted for the head commit.
 
 ## Inputs
 
@@ -177,7 +199,7 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 |-------|----------|---------|-------------|
 | `anthropic_api_key` | No | `""` | Anthropic API key (alternative to OAuth) |
 | `claude_code_oauth_token` | No | `""` | Claude Code OAuth token (alternative to API key) |
-| `memcan_url` | No | `""` | MemCan server URL (e.g., `http://host:8190`) |
+| `memcan_url` | No | `""` | MemCan server URL (e.g., `https://memcan.example.com`) |
 | `memcan_api_key` | No | `""` | MemCan API key for server authentication |
 | `github_token` | No | `${{ github.token }}` | GitHub token for API/CLI |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token` |
@@ -192,7 +214,7 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 | `remove_review_request_on_success` | No | `true` | Whether to clear `reviewer_login`'s pending review request |
 | `checkout` | No | `true` | Whether action handles git checkout (the PR head commit). If `false`, check out the PR head yourself with enough history to reach `origin/<base>` |
 | `fetch_depth` | No | `0` | Git fetch depth (only if checkout=true). Reviewers diff against `origin/<base>`, so keep `0` or deep enough to reach the merge base |
-| `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude |
+| `allowed_tools` | No | *(see action.yml)* | Tool allowlist for Claude. The default covers the review flow; MemCan write tools are always denied |
 | `claude_extra_args` | No | `""` | Additional Claude Code CLI flags (appended to built-in args) |
 | `report_retention_days` | No | `14` | Artifact retention days |
 | `upload_transcripts` | No | `false` | Upload Claude Code session transcripts (coordinator + sub-agents, plus the execution log) as a GPG-encrypted artifact. Requires `transcripts_recipients` — the action fails instead of uploading plaintext |
@@ -260,7 +282,7 @@ permissions:
 
 ## Learn Action
 
-The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v2`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
+The **Claudius Learn** action (`lklimek/claudius-review-action/learn@v3`) extracts reusable learnings from completed PR code reviews and saves them to MemCan. It runs after a PR merges, analyzes how developers responded to review findings (accepted, rejected, or ignored), and stores project-specific patterns so future reviews improve over time.
 
 ### Quick Start
 
@@ -281,7 +303,7 @@ jobs:
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
-      - uses: lklimek/claudius-review-action/learn@v2
+      - uses: lklimek/claudius-review-action/learn@v3
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           memcan_url: ${{ secrets.MEMCAN_URL }}

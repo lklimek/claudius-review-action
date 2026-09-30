@@ -15,7 +15,7 @@ jobs:
     env:
       ANTHROPIC_MODEL: sonnet
     steps:
-      - uses: lklimek/claudius-review-action/learn@v2
+      - uses: lklimek/claudius-review-action/learn@v3
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           memcan_url: ${{ secrets.MEMCAN_URL }}
