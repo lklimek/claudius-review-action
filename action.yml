@@ -526,10 +526,14 @@ runs:
         # the PR author, newest first. Claudius = post_pr_review.py's attribution
         # footer (always in its body), posted by a bot or a repo collaborator so
         # an outsider pasting the footer does not count. Any github_token identity.
-        IDS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+        ROWS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
           --jq ".[] | select(.commit_id == \"${HEAD_SHA}\" and .submitted_at >= \"${REVIEW_STARTED_AT}\" and .user.login != \"${PR_AUTHOR}\"
             and ((.body // \"\") | contains(\"${FOOTER}\"))
-            and (.user.type == \"Bot\" or (.author_association | IN(\"OWNER\", \"MEMBER\", \"COLLABORATOR\")))) | .id" | tac | xargs)
+            and (.user.type == \"Bot\" or (.author_association | IN(\"OWNER\", \"MEMBER\", \"COLLABORATOR\")))) | \"\\(.id) \\(.user.login)\"" | tac)
+        IDS=$(printf '%s\n' "$ROWS" | cut -d' ' -f1 | xargs)
+        if [ -n "$IDS" ]; then
+          echo "Claudius review posted as @$(printf '%s\n' "$ROWS" | head -n1 | cut -d' ' -f2)"
+        fi
         echo "ids=${IDS}" >> "$GITHUB_OUTPUT"
       env:
         GH_TOKEN: ${{ inputs.github_token }}
@@ -557,7 +561,8 @@ runs:
         fi
         if [ -z "$POSTED_IDS" ]; then
           echo "::error::report.json exists but no Claudius review was posted on ${HEAD_SHA} during this run —" \
-            "post_pr_review.py failed or was never called. The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
+            "post_pr_review.py failed or was never called, or the posting identity is neither a bot nor a repo collaborator/org member" \
+            "(see docs/how-it-works.md, 'Posted-review detection'). The '${{ inputs.trigger_label }}' label stays on the PR so this can be retried."
           exit 1
         fi
       env:

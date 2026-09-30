@@ -27,8 +27,10 @@ when it evaluates to an empty string — the action then has no token, it does n
 fall back to `GITHUB_TOKEN`. That happens whenever the token step is skipped or
 removed (or its output is misspelled) while `github_token` still references it.
 The `|| github.token` fallback above keeps the review running as
-`github-actions[bot]` in that case; drop the `github_token` line entirely to go
-back to the default identity.
+`github-actions[bot]` in that case — with the job's `permissions:` rather than
+the App token's narrower scope, so keep those least-privilege too. The action
+logs which identity posted the review. Drop the `github_token` line entirely to
+go back to the default identity.
 
 App setup: repository permissions **Contents: Read-only** (no push),
 **Issues: Read & write**, **Pull requests: Read & write** (Metadata: Read is

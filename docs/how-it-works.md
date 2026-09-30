@@ -30,5 +30,15 @@ afterwards) and continues without MemCan if the server isn't usable. It warns
 when the URL is plain HTTP to a non-local host. MemCan is search-only in CI:
 write tools are always denied, since PR content is untrusted.
 
+**Posted-review detection.** After the review, the action looks for the review
+it posted: on the head commit, submitted during this run, not by the PR
+author, containing claudius's attribution footer, and authored by a bot or a
+repo collaborator/org member (`author_association` OWNER/MEMBER/COLLABORATOR).
+The last check stops an outsider pasting the footer from counting. A machine
+user posting via `github_token` must therefore be a repository collaborator
+(any role, e.g. triage) or org member — otherwise the job fails with "no
+Claudius review was posted" even though the review is visible. The report
+link is appended to the newest matching review.
+
 This repository reviews its own non-draft PRs with the PR's version of the
 action — see [`.github/workflows/claudius-review.yml`](../.github/workflows/claudius-review.yml).
