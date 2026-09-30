@@ -46,8 +46,8 @@ jobs:
       CLAUDE_CODE_EFFORT_LEVEL: high
     steps:
       # Optional: post as your own GitHub App (<slug>[bot]). Mint the token first.
-      # Dropping this step? Drop `github_token` below too: an empty value is
-      # passed as-is, not replaced by the default.
+      # An empty `github_token` is passed as-is, not replaced by the default —
+      # hence the `|| github.token` fallback below.
       - uses: actions/create-github-app-token@v3
         id: app-token
         with:
@@ -64,7 +64,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Identity the review is posted as.
-          github_token: ${{ steps.app-token.outputs.token }}
+          github_token: ${{ steps.app-token.outputs.token || github.token }}
           allowed_non_write_users: my-triage-bot
           # MemCan (optional, search-only in CI).
           memcan_url: ${{ secrets.MEMCAN_URL }}
