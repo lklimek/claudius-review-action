@@ -166,7 +166,7 @@ Claude to run that skill. The skill:
    onto the diff, skips ones already raised in open threads and approves the
    PR when nothing is left unresolved.
 
-Requires **claudius ≥ 8.2.0** (installed from the marketplace at run time).
+Requires **claudius ≥ 8.3.0** (installed from the marketplace at run time).
 All GitHub access goes through the `gh` CLI (no GitHub MCP server).
 
 **Permissions.** The default `allowed_tools` holds only what the flow needs:
@@ -189,7 +189,7 @@ action — see [`.github/workflows/claudius-review.yml`](.github/workflows/claud
 
 v3 is a breaking release:
 
-- **claudius ≥ 8.2.0 is required** — the review is posted by its `post_pr_review.py`; the job fails with an older plugin.
+- **claudius ≥ 8.3.0 is required** — the review is posted by its `post_pr_review.py`; the job fails with an older plugin.
 - **Narrower default `allowed_tools`** — a static allowlist of what the flow needs; custom review flows relying on other tools must pass their own list.
 - **Changed flow** — reviewers run in parallel, and the job fails when no review was posted for the head commit.
 
