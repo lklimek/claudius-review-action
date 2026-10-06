@@ -15,7 +15,7 @@ Claude to run that skill. The skill:
    onto the diff, skips ones already raised in open threads and approves the
    PR when nothing is left unresolved.
 
-Requires **claudius ≥ 8.3.0** (installed from the marketplace at run time).
+Requires **claudius ≥ 9.0.0** (installed from the marketplace at run time).
 All GitHub access goes through the `gh` CLI (no GitHub MCP server).
 
 **Permissions.** The default `allowed_tools` holds only what the flow needs:

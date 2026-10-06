@@ -1,6 +1,6 @@
 # Claudius PR Review Action
 
-A reusable GitHub composite action that wraps [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) for AI-powered PR reviews with the Claudius pipeline: it checks earlier review threads (listing fixed ones in the review; resolving them needs Contents write, see [GitHub App](docs/github-app.md)), runs a multi-specialist static review, posts inline findings and approves the PR when nothing unresolved remains. Requires claudius >= 8.3.0 (installed at run time).
+A reusable GitHub composite action that wraps [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) for AI-powered PR reviews with the Claudius pipeline: it checks earlier review threads (listing fixed ones in the review; resolving them needs Contents write, see [GitHub App](docs/github-app.md)), runs a multi-specialist static review, posts inline findings and approves the PR when nothing unresolved remains. Requires claudius >= 9.0.0 (installed at run time).
 
 The action runs under your own GitHub App: the calling workflow mints a short-lived installation token and passes it as `github_token`, so every review, reply and label change is posted as `<app-slug>[bot]`.
 
