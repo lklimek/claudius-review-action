@@ -1,0 +1,44 @@
+# How it works
+
+The action installs a small `ci-pr-review` skill and `claudius-ci-reviewer`
+agent (from [`claude/`](../claude)) into the runner's `~/.claude`, then asks
+Claude to run that skill. The skill:
+
+1. runs `claudius:check-pr-comments` — replies to threads that are already
+   fixed and resolves them when the token may (needs Contents write; with the
+   recommended read-only App they are listed in the review body instead);
+2. runs `claudius:grumpy-review` with CI overrides — reviewers run **in
+   parallel**, do **static review only** (no builds, tests or
+   reproduction attempts; unconfirmed findings are reported, not dropped),
+   and a report is **always** written, even when nothing was found;
+3. posts the review with claudius's `post_pr_review.py`, which maps findings
+   onto the diff, skips ones already raised in open threads and approves the
+   PR when nothing is left unresolved.
+
+Requires **claudius ≥ 8.3.0** (installed from the marketplace at run time).
+All GitHub access goes through the `gh` CLI (no GitHub MCP server).
+
+**Permissions.** The default `allowed_tools` holds only what the flow needs:
+file tools, read-only `git` and `gh pr` commands, the claudius plugin scripts
+and MemCan search. `gh api`, `env`, `curl` and shells are not on it. This
+raises the bar for prompt injection via PR content but is not a sandbox: file
+tools are not confined to the workspace, so only run reviews on PRs from
+authors you trust with the job's secrets.
+
+**MemCan preflight.** When `memcan_url`/`memcan_api_key` are set, the action
+probes `/health` and an MCP `initialize` (status codes only, session closed
+afterwards) and continues without MemCan if the server isn't usable. It warns
+when the URL is plain HTTP to a non-local host. MemCan is search-only in CI:
+write tools are always denied, since PR content is untrusted.
+
+**Posted-review detection.** After the review, the action looks for the review
+it posted: on the head commit, submitted during this run, not by the PR
+author, containing claudius's attribution footer, and authored by a bot or a
+repo collaborator/org member (`author_association` OWNER/MEMBER/COLLABORATOR;
+footer and origin rule: [`lib/claudius.jq`](../lib/claudius.jq)).
+The last check stops an outsider pasting the footer from counting; the
+GitHub App the review is posted as is a bot, so it always passes. The report
+link is appended to the newest matching review.
+
+This repository reviews its own non-draft PRs with the PR's version of the
+action — see [`.github/workflows/claudius-review.yml`](../.github/workflows/claudius-review.yml).

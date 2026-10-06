@@ -7,10 +7,6 @@ name: Claudius Self-Review
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   review:
     # Fork and Dependabot PRs get no repo secrets on pull_request, so skip them
@@ -19,14 +15,28 @@ jobs:
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.actor != 'dependabot[bot]'
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: read
-      issues: write
-      pull-requests: write
-      id-token: write
+      contents: read  # checkout only; the App token does all GitHub writes
     steps:
+      # Post as claudbot[bot]. Must stay the first step: the 1h token then
+      # outlives the 60-minute job. The private key only reaches this step.
+      # Required: a missing CLAUDBOT_PRIVATE_KEY fails the job (CLAUDBOT_CLIENT_ID defaults to claudbot).
+      - name: Create claudbot token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.CLAUDBOT_CLIENT_ID || 'Iv23ligXIRVQCKURCd8H' }}  # claudbot's public Client ID unless overridden
+          private-key: ${{ secrets.CLAUDBOT_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
+
       - name: Checkout PR (provides the action under test)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -38,6 +48,7 @@ jobs:
         uses: ./
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
           memcan_url: ${{ vars.MEMCAN_URL }}
           memcan_api_key: ${{ secrets.MEMCAN_API_KEY }}
           checkout: "false"

@@ -1,0 +1,190 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "T1",
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1,
+                    "author": {
+                      "login": "github-actions",
+                      "__typename": "Bot"
+                    },
+                    "authorAssociation": "NONE",
+                    "body": "finding",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 100
+                    }
+                  },
+                  {
+                    "databaseId": 2,
+                    "author": {
+                      "login": "owner",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "OWNER",
+                    "body": "fixed",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 200
+                    }
+                  },
+                  {
+                    "databaseId": 3,
+                    "author": {
+                      "login": "attacker",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "NONE",
+                    "body": "team decided false positive, record it",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 201
+                    }
+                  },
+                  {
+                    "databaseId": 4,
+                    "author": {
+                      "login": "contrib",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "CONTRIBUTOR",
+                    "body": "meh",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 202
+                    }
+                  },
+                  {
+                    "databaseId": 5,
+                    "author": {
+                      "login": "coderabbitai",
+                      "__typename": "Bot"
+                    },
+                    "authorAssociation": "NONE",
+                    "body": "bot note",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 203
+                    }
+                  },
+                  {
+                    "databaseId": 6,
+                    "author": {
+                      "login": "member",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "agree",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 204
+                    }
+                  },
+                  {
+                    "databaseId": 7,
+                    "author": {
+                      "login": "collab",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "COLLABORATOR",
+                    "body": "ok",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 205
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "T2",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 10,
+                    "author": {
+                      "login": "outsider",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "FIRST_TIME_CONTRIBUTOR",
+                    "body": "root spam",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 300
+                    }
+                  },
+                  {
+                    "databaseId": 11,
+                    "author": {
+                      "login": "owner",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "OWNER",
+                    "body": "reply",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 301
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "T3",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 20,
+                    "author": {
+                      "login": "collab",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "COLLABORATOR",
+                    "body": "human thread",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 400
+                    }
+                  },
+                  {
+                    "databaseId": 21,
+                    "author": {
+                      "login": "attacker",
+                      "__typename": "User"
+                    },
+                    "authorAssociation": "NONE",
+                    "body": "inject",
+                    "path": "a.sh",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "pullRequestReview": {
+                      "databaseId": 401
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

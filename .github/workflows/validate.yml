@@ -21,7 +21,7 @@ jobs:
         run: |
           # pipx gives an isolated venv; a --user pip install picks up the
           # runner's preinstalled click, which newer check-jsonschema rejects.
-          pipx run check-jsonschema --schemafile "https://json.schemastore.org/github-action.json" action.yml
+          pipx run check-jsonschema --schemafile "https://json.schemastore.org/github-action.json" action.yml learn/action.yml
 
       - name: Lint example workflows
         run: |
@@ -33,10 +33,22 @@ jobs:
       - name: Check YAML document markers
         run: |
           status=0
-          for f in action.yml examples/*.yml .github/workflows/claudius-review.yml; do
+          for f in action.yml learn/action.yml examples/*.yml .github/workflows/*.yml; do
             if ! head -1 "$f" | grep -q '^---'; then
               echo "::error file=$f::Missing YAML document marker (---) at start of file"
               status=1
             fi
           done
           exit "$status"
+
+      - name: Lint shell scripts
+        run: shellcheck learn/shared/*.sh tests/*.sh tests/bin/gh
+
+      - name: Smoke-check lib/claudius.jq
+        run: |
+          jq -e -n -L lib 'include "claudius"; (claudius_footer | length > 0) and ({user: {type: "Bot"}} | trusted_origin)'
+
+      - name: Run offline tests
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y python3-yaml
+          tests/run.sh

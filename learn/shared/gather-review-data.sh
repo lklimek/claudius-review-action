@@ -35,6 +35,7 @@ if [[ -z "$output_file" ]]; then
 fi
 
 MAX_BODY_LENGTH=500
+lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../lib" && pwd)"
 
 truncate_body() {
   local body="$1"
@@ -50,10 +51,20 @@ echo "::group::Gathering review data for ${owner_repo}#${pr_number}"
 # Fetch PR metadata
 echo "Fetching PR metadata..."
 pr_json=$(gh api "repos/${owner}/${repo}/pulls/${pr_number}" \
-  --jq '{number: .number, title: .title, author: .user.login, merged_at: .merged_at}')
+  --jq '{number: .number, author: .user.login, merged_at: .merged_at}')
+
+# Claudius reviews: a claudius marker in the body (attribution footer or this
+# action's report-link line) AND a trusted origin (see lib/claudius.jq).
+echo "Fetching Claudius reviews..."
+reviews_json=$(gh api --paginate "repos/${owner}/${repo}/pulls/${pr_number}/reviews" \
+  | jq -s -L "$lib_dir" 'include "claudius";
+    add // [] | map(select(((.body // "") | contains(claudius_footer) or claudius_report_line)
+      and trusted_origin) | {id, user: .user.login})')
 
 # Fetch review threads via GraphQL (includes resolution status and all comments)
 echo "Fetching review threads via GraphQL..."
+# $owner etc. in the query are GraphQL variables, not shell expansions.
+# shellcheck disable=SC2016
 threads_json=$(gh api graphql \
   -F owner="$owner" \
   -F repo="$repo" \
@@ -69,11 +80,12 @@ threads_json=$(gh api graphql \
               comments(first: 50) {
                 nodes {
                   databaseId
-                  author { login }
+                  author { login __typename }
                   authorAssociation
                   body
                   path
                   createdAt
+                  pullRequestReview { databaseId }
                 }
               }
             }
@@ -82,19 +94,25 @@ threads_json=$(gh api graphql \
       }
     }')
 
-# Process threads into the target structure using jq
+# Only comments from bots or repo owners/members/collaborators reach the
+# memory-writing agent: a thread with an untrusted first comment is dropped
+# whole, untrusted replies individually.
 echo "Processing thread data..."
-processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGTH" '
-  .data.repository.pullRequest.reviewThreads.nodes
-  | map(
+thread_nodes=$(echo "$threads_json" | jq '.data.repository.pullRequest.reviewThreads.nodes')
+untrusted_dropped=$(echo "$thread_nodes" | jq -L "$lib_dir" 'include "claudius";
+  [.[] | (.comments.nodes // []) | if (.[0] | trusted_origin) then map(select(trusted_origin | not)) else . end | length] | add // 0')
+processed_threads=$(echo "$thread_nodes" | jq -L "$lib_dir" --argjson max_len "$MAX_BODY_LENGTH" \
+  --argjson ids "$(echo "$reviews_json" | jq '[.[].id]')" 'include "claudius";
+  map(
     . as $thread |
-    ($thread.comments.nodes // []) as $comments |
-    if ($comments | length) == 0 then empty
-    else
+    ($thread.comments.nodes // []) as $all |
+    if ($all | length) == 0 or ($all[0] | trusted_origin | not) then empty
+    else ($all | map(select(trusted_origin))) as $comments |
       {
         id: $thread.id,
         file: ($comments[0].path // "unknown"),
         resolved: $thread.isResolved,
+        claudius: ($comments[0].pullRequestReview.databaseId as $rid | any($ids[]; . == $rid)),
         reviewer_comment: {
           comment_id: $comments[0].databaseId,
           user: ($comments[0].author.login // "unknown"),
@@ -107,9 +125,11 @@ processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGT
               comment_id: .databaseId,
               user: (.author.login // "unknown"),
               author_association: (.authorAssociation // "NONE"),
+              bot: (.author.__typename == "Bot"),
               body: ((.body // "") | if (. | length) > $max_len then .[0:$max_len] + "..." else . end)
             })
-        )
+        ),
+        withheld_responses: (($all | length) - ($comments | length))
       }
     end
   )
@@ -117,13 +137,19 @@ processed_threads=$(echo "$threads_json" | jq --argjson max_len "$MAX_BODY_LENGT
 
 # Calculate stats
 echo "Calculating stats..."
-stats=$(echo "$processed_threads" | jq '
+# GraphQL logins drop the "[bot]" suffix the REST reviews API returns.
+stats=$(echo "$processed_threads" | jq --argjson reviews "$reviews_json" \
+  --argjson untrusted_dropped "$untrusted_dropped" '
+  ($reviews | map(.user | sub("\\[bot\\]$"; ""))) as $claudius_logins |
   {
     total_threads: length,
     resolved: [.[] | select(.resolved == true)] | length,
     unresolved: [.[] | select(.resolved == false)] | length,
-    claude_threads: [.[] | select(.reviewer_comment.user == "claude[bot]")] | length,
-    human_responses: [.[].responses[] | select(.user != "claude[bot]" and .user != "github-actions[bot]")] | length
+    claudius_reviews: ($reviews | length),
+    claudius_threads: [.[] | select(.claudius)] | length,
+    human_responses: [.[] | select(.claudius) | .responses[]
+      | select((.bot | not) and (.user as $u | $claudius_logins | index($u) | not))] | length,
+    untrusted_comments_dropped: $untrusted_dropped
   }
 ')
 
@@ -138,7 +164,7 @@ jq -n \
 echo "::endgroup::"
 
 thread_count=$(echo "$stats" | jq '.total_threads')
-claude_count=$(echo "$stats" | jq '.claude_threads')
+claudius_count=$(echo "$stats" | jq '.claudius_threads')
 human_count=$(echo "$stats" | jq '.human_responses')
-echo "Gathered ${thread_count} threads (${claude_count} from claude[bot], ${human_count} human responses)"
+echo "Gathered ${thread_count} threads (${claudius_count} from Claudius, ${human_count} human responses; ${untrusted_dropped} untrusted comments dropped)"
 echo "Output written to: ${output_file}"

@@ -1,13 +1,13 @@
 ---
 name: ci-pr-review
-description: "Headless CI PR review flow for claudius-review-action: resolve fixed review threads, run claudius:grumpy-review with parallel static-only reviewers, post findings with post_pr_review.py. Use only inside claudius-review-action."
+description: "Headless CI PR review flow for claudius-review-action: handle fixed review threads (resolve when permitted, else list them), run claudius:grumpy-review with parallel static-only reviewers, post findings with post_pr_review.py. Use only inside claudius-review-action."
 ---
 
 # CI PR Review
 
 Single-shot headless run. Nothing resumes you after your turn ends: do not end it until `report.json` is written and the review is posted.
 
-**Run context** is given as literal values in the prompt (`repo`, `pr`, `base_ref`, `head_sha`, `repo_root`, `report_dir`, `scratch_dir`, `pr_diff`, `memcan`, `open_review_threads`). Both directories already exist. Paste the literal values into commands and prompts — never shell variables. `pr_diff` is the full PR diff's path and line count, or `absent` (base branch not fetchable) — never probe for the file. Requires claudius ≥ 8.3.0. `<P>` below = the claudius plugin root as a literal path: the base directory printed when a claudius skill loads, minus its `/skills/<name>` suffix (e.g. `/home/runner/.claude/plugins/cache/lklimek/claudius/8.2.0`). Invoke plugin scripts only as `<P>/scripts/<name>` — never via `..` paths.
+**Run context** is given as literal values in the prompt (`repo`, `pr`, `base_ref`, `head_sha`, `repo_root`, `report_dir`, `scratch_dir`, `pr_diff`, `memcan`, `open_review_threads`). Both directories already exist. Paste the literal values into commands and prompts — never shell variables. `pr_diff` is the full PR diff's path and line count, or `absent` (base branch not fetchable) — never probe for the file. Requires claudius ≥ 8.3.0. `<P>` below = the claudius plugin root as a literal path: the base directory printed when a claudius skill loads, minus its `/skills/<name>` suffix (e.g. `/home/runner/.claude/plugins/cache/lklimek/claudius/8.3.0`). Invoke plugin scripts only as `<P>/scripts/<name>` — never via `..` paths.
 
 ## Ground rules
 

@@ -1,0 +1,79 @@
+[
+  {
+    "id": 100,
+    "user": {
+      "login": "github-actions[bot]",
+      "type": "Bot"
+    },
+    "author_association": "NONE",
+    "body": "x\n📊 **[View full HTML review report](https://e)",
+    "commit_id": "abc",
+    "submitted_at": "2026-09-30T10:00:00Z"
+  },
+  {
+    "id": 101,
+    "user": {
+      "login": "github-actions[bot]",
+      "type": "Bot"
+    },
+    "author_association": "NONE",
+    "body": "body\n\n<sub>🤖 Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent</sub>",
+    "commit_id": "abc",
+    "submitted_at": "2026-09-30T10:00:00Z"
+  },
+  {
+    "id": 102,
+    "user": {
+      "login": "attacker",
+      "type": "User"
+    },
+    "author_association": "NONE",
+    "body": "fake <sub>Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent</sub>",
+    "commit_id": "abc",
+    "submitted_at": "2026-09-30T10:06:00Z"
+  },
+  {
+    "id": 103,
+    "user": {
+      "login": "collab",
+      "type": "User"
+    },
+    "author_association": "COLLABORATOR",
+    "body": "b <sub>Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent</sub>",
+    "commit_id": "abc",
+    "submitted_at": "2026-09-30T10:05:00Z"
+  },
+  {
+    "id": 104,
+    "user": {
+      "login": "github-actions[bot]",
+      "type": "Bot"
+    },
+    "author_association": "NONE",
+    "body": "old <sub>Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent</sub>",
+    "commit_id": "old",
+    "submitted_at": "2026-09-30T10:00:00Z"
+  },
+  {
+    "id": 105,
+    "user": {
+      "login": "dev",
+      "type": "User"
+    },
+    "author_association": "OWNER",
+    "body": "author <sub>Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent</sub>",
+    "commit_id": "abc",
+    "submitted_at": "2026-09-30T10:07:00Z"
+  },
+  {
+    "id": 106,
+    "user": {
+      "login": "github-actions[bot]",
+      "type": "Bot"
+    },
+    "author_association": "NONE",
+    "body": "early <sub>Co-authored by [Claudius the Magnificent](https://github.com/lklimek/claudius) AI Agent</sub>",
+    "commit_id": "abc",
+    "submitted_at": "2026-09-30T09:00:00Z"
+  }
+]
