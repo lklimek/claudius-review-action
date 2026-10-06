@@ -356,6 +356,7 @@ runs:
         INPUT_MODEL: ${{ inputs.model }}
 
     - name: Pre-compute PR diff
+      id: prdiff
       shell: bash
       run: |
         # Consumed by "List reviews posted this run".
@@ -365,9 +366,13 @@ runs:
         if ! git diff "origin/${BASE_REF}...HEAD" > "$S/pr.diff" 2>/dev/null; then
           rm -f "$S/pr.diff"
           echo "::warning::Could not diff against origin/${BASE_REF} (base not fetched?) — reviewers fall back to git diff."
+          echo "status=absent" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        echo "pr.diff: $(wc -l < "$S/pr.diff") lines"
+        LINES=$(wc -l < "$S/pr.diff")
+        echo "pr.diff: ${LINES} lines"
+        # Run context for the review: saves the coordinator probing for the file.
+        echo "status=$S/pr.diff (${LINES} lines)" >> "$GITHUB_OUTPUT"
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
 
@@ -416,6 +421,8 @@ runs:
           - pr: ${{ github.event.pull_request.number }}
           - base_ref: ${{ github.event.pull_request.base.ref }}
           - head_sha: ${{ github.event.pull_request.head.sha }}
+          - repo_root: ${{ github.workspace }}
+          - pr_diff: ${{ steps.prdiff.outputs.status || 'absent' }}
           - report_dir: ${{ github.workspace }}/review-report
           - scratch_dir: ${{ runner.temp }}/claudius-review
           - memcan: ${{ env.MEMCAN_AVAILABLE }}
@@ -636,8 +643,9 @@ runs:
       if: '!cancelled()'
       shell: bash
       run: |
-        # The review flow needs claudius >= 8.2.0 (post_pr_review.py, finalize,
-        # anchored script paths). Runs after the review — the plugin is installed
+        # The review flow needs claudius >= 8.3.0 (post_pr_review.py, finalize
+        # pr_comments/pr_review_body, prepare --commit, anchored script paths).
+        # Runs after the review — the plugin is installed
         # inside claude-code-action, so no earlier check is possible. Runs last so
         # a failure never skips the report link or cleanup; also runs when the
         # review step failed, since a stale plugin is a likely cause. With several
@@ -649,8 +657,8 @@ runs:
           echo "::error::No claudius plugin found in the plugin cache — check the plugins/plugin_marketplaces inputs."
           exit 1
         fi
-        if [ "$(printf '%s\n' 8.2.0 "$V" | sort -V | head -n1)" != "8.2.0" ]; then
-          echo "::error::claudius ${V} is installed, but this action requires claudius >= 8.2.0 — check the plugins/plugin_marketplaces inputs."
+        if [ "$(printf '%s\n' 8.3.0 "$V" | sort -V | head -n1)" != "8.3.0" ]; then
+          echo "::error::claudius ${V} is installed, but this action requires claudius >= 8.3.0 — check the plugins/plugin_marketplaces inputs."
           exit 1
         fi
 
