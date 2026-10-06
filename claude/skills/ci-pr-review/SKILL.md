@@ -48,7 +48,7 @@ If `open_review_threads` is `0`, skip this section. Otherwise `Skill(claudius:ch
 ## 3. Post the review
 
 1. Content (written in §2.5, keyed by provisional `<agent>:<original_id>`; finalize maps to final IDs): `pr_comments` — the script posts every eligible finding (MEDIUM+ and all blocking) regardless; this map only overrides a finding's comment text, and `null` suppresses that finding. Give the MEDIUM+ findings (per the digest bands and your re-rating) persona text. `pr_review_body` = a one-line verdict in persona (plus the fixed-but-unresolved threads from §1, if any).
-2. Post once — in the SAME message as finalize, after it (a failed finalize cancels the post and leaves no `report.json`/`comments.json`/`body.md`; fix and send both again). Never Read `report.json`:
+2. Post once — in the SAME message as finalize, after it. The batch is not dependency-ordered: the post may run even when finalize fails. That is safe because finalize is all-or-nothing — on failure it leaves no `report.json`/`comments.json`/`body.md` (earlier ones are renamed `*.stale`), so the post exits non-zero without posting. Check both results: finalize failed → fix and send both again; only the post failed → re-send the post alone. Never Read `report.json`:
    ```bash
    python3 <P>/scripts/post_pr_review.py <repo> <pr> <report_dir>/report.json --commit <head_sha> --comments <report_dir>/comments.json --body-file <report_dir>/body.md
    ```
