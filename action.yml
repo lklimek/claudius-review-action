@@ -392,7 +392,7 @@ runs:
 
     - name: Run Claude Code Review
       id: claude
-      uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790  # v1.0.235
+      uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc  # v1.0.248
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
@@ -444,7 +444,7 @@ runs:
     - name: Upload review report
       id: upload-report
       if: '!cancelled()'
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: claude-review-report-pr-${{ github.event.pull_request.number }}
         path: |
@@ -522,7 +522,7 @@ runs:
 
     - name: Upload Claude Code transcripts
       if: ${{ !cancelled() && inputs.upload_transcripts == 'true' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: claude-transcripts-pr-${{ github.event.pull_request.number }}
         path: ${{ runner.temp }}/claude-transcripts
