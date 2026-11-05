@@ -34,7 +34,7 @@ inputs:
     required: false
     default: "claudius-ci-reviewer"
   model:
-    description: "Model for the main (coordinator) thread, e.g. sonnet or opus. Written into the bundled coordinator agent's frontmatter and also passed as --model. Reviewer sub-agents always use the per-role models assigned by claudius:grumpy-review. Empty = Claude Code's default (ANTHROPIC_MODEL)."
+    description: "Model for the main (coordinator) thread, e.g. sonnet or opus. Written into the bundled coordinator agent's frontmatter and also passed as --model. Reviewer sub-agents always use the per-role models assigned by claudius:review-changes (full mode). Empty = Claude Code's default (ANTHROPIC_MODEL)."
     required: false
     default: "sonnet"
   plugins:
@@ -643,7 +643,8 @@ runs:
       if: '!cancelled()'
       shell: bash
       run: |
-        # The review flow needs claudius >= 9.0.0 (post_pr_review.py, finalize
+        # The review flow needs claudius >= 11.0.0 (review-changes full mode,
+        # post_pr_review.py, finalize
         # pr_comments/pr_review_body, prepare --commit, anchored script paths,
         # severity's merge-classification reference).
         # Runs after the review — the plugin is installed
@@ -658,8 +659,8 @@ runs:
           echo "::error::No claudius plugin found in the plugin cache — check the plugins/plugin_marketplaces inputs."
           exit 1
         fi
-        if [ "$(printf '%s\n' 9.0.0 "$V" | sort -V | head -n1)" != "9.0.0" ]; then
-          echo "::error::claudius ${V} is installed, but this action requires claudius >= 9.0.0 — check the plugins/plugin_marketplaces inputs."
+        if [ "$(printf '%s\n' 11.0.0 "$V" | sort -V | head -n1)" != "11.0.0" ]; then
+          echo "::error::claudius ${V} is installed, but this action requires claudius >= 11.0.0 — check the plugins/plugin_marketplaces inputs."
           exit 1
         fi
 

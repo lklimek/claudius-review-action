@@ -38,8 +38,8 @@ README.md
 The flow lives in the `ci-pr-review` skill (`claude/skills/ci-pr-review/SKILL.md`); the prompt in `action.yml` only invokes it. Keep flow instructions in the skill, not the prompt.
 
 1. `claudius:check-pr-comments` — check previous review threads; reply to fixed ones and resolve them if the token may (needs Contents write — the recommended read-only App lists them in the review body instead)
-2. `claudius:grumpy-review` — all reviewers in parallel, static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
-3. Post the review with claudius `post_pr_review.py` (diff mapping, open-thread dedup; APPROVE when nothing unresolved remains, else COMMENT) — requires claudius ≥ 9.0.0
+2. `claudius:review-changes` (full mode) — all reviewers in parallel, static-only specialist agents (no builds/tests/reproduction), consolidated report always written (empty is valid)
+3. Post the review with claudius `post_pr_review.py` (diff mapping, open-thread dedup; APPROVE when nothing unresolved remains, else COMMENT) — requires claudius ≥ 11.0.0
 
 Steps 1 and 2 MUST use the `Skill` tool — never perform their work manually. GitHub access is `gh` CLI only (claudius no longer ships a GitHub MCP server).
 
@@ -58,7 +58,7 @@ When improving this action's performance, apply these criteria in priority order
 - Plugin-based architecture: claudius, claudash, memcan — loaded via `plugins` input
 - Auth: dual-mode — either `anthropic_api_key` or `claude_code_oauth_token` must be provided
 - GitHub identity: a GitHub App installation token minted by the caller (`actions/create-github-app-token`) is the only supported setup; `github_token` is required, no `GITHUB_TOKEN` fallback, job `permissions:` is `contents: read` (review) / `{}` (learn), never `id-token: write`
-- Claude Code behavior (effort, max turns) is controlled via env vars set in the caller's workflow; the coordinator model is the `model` input (templated into the bundled agent), reviewer models come from `claudius:grumpy-review`
+- Claude Code behavior (effort, max turns) is controlled via env vars set in the caller's workflow; the coordinator model is the `model` input (templated into the bundled agent), reviewer models come from `claudius:review-changes` (full mode)
 - `learn/` is WIP — the interface is unstable, do not treat it as production-ready
 
 ## Development

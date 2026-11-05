@@ -7,7 +7,7 @@ Claude to run that skill. The skill:
 1. runs `claudius:check-pr-comments` — replies to threads that are already
    fixed and resolves them when the token may (needs Contents write; with the
    recommended read-only App they are listed in the review body instead);
-2. runs `claudius:grumpy-review` with CI overrides — reviewers run **in
+2. runs `claudius:review-changes` in full mode with CI overrides — reviewers run **in
    parallel**, do **static review only** (no builds, tests or
    reproduction attempts; unconfirmed findings are reported, not dropped),
    and a report is **always** written, even when nothing was found;
@@ -15,7 +15,7 @@ Claude to run that skill. The skill:
    onto the diff, skips ones already raised in open threads and approves the
    PR when nothing is left unresolved.
 
-Requires **claudius ≥ 9.0.0** (installed from the marketplace at run time).
+Requires **claudius ≥ 11.0.0** (installed from the marketplace at run time).
 All GitHub access goes through the `gh` CLI (no GitHub MCP server).
 
 **Permissions.** The default `allowed_tools` holds only what the flow needs:
