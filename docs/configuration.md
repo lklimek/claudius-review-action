@@ -11,7 +11,7 @@
 | `github_token` | **Yes** | | GitHub App installation token minted in the calling workflow (`${{ steps.app-token.outputs.token }}`, see [GitHub App setup](github-app.md)). Used for all GitHub API/CLI access; the review is posted as `<app-slug>[bot]`. An empty value fails the job ([Failure modes](github-app.md#failure-modes)) |
 | `allowed_non_write_users` | No | `""` | Comma-separated usernames (or `*`) allowed to trigger the review without write/admin access — e.g. a triage-permission bot that only applies the trigger label. Passed through to `claude-code-action`; requires `github_token`. **WARNING: bypasses a real security gate — keep it scoped to specific trusted accounts; avoid `*` on public repos** |
 | `claude_agent` | No | `claudius-ci-reviewer` | Main-thread agent. The default is the lightweight coordinator shipped in [`claude/agents`](../claude/agents); with a plugin agent (e.g. `claudius:claudius`) its frontmatter model may take precedence over `model` |
-| `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:grumpy-review`. Empty = Claude Code default |
+| `model` | No | `sonnet` | Coordinator (main-thread) model. Reviewer sub-agents always use the per-role models from `claudius:review-changes` (full mode). Empty = Claude Code default |
 | `plugins` | No | `claudius@lklimek`, `claudash@lklimek`, `memcan@lklimek` | Newline-separated plugin list |
 | `plugin_marketplaces` | No | `https://github.com/lklimek/agents.git` | Newline-separated marketplace URLs |
 | `prompt_extra` | No | `""` | Additional instructions appended to core prompt |
@@ -47,7 +47,7 @@ jobs:
 
 The coordinator model is set by the `model` input (default `sonnet`), not by
 `ANTHROPIC_MODEL`. Reviewer sub-agents get their models per role from
-`claudius:grumpy-review`; leave `CLAUDE_CODE_SUBAGENT_MODEL` unset.
+`claudius:review-changes` (full mode); leave `CLAUDE_CODE_SUBAGENT_MODEL` unset.
 
 ## Outputs
 
